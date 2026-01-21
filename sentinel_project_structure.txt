@@ -1,0 +1,195 @@
+SENTINEL/
+│
+├── desktop-app/                      # Employee Desktop Application (Python)
+│   ├── src/
+│   │   ├── __init__.py
+│   │   ├── main.py                   # Application entry point
+│   │   ├── auth/
+│   │   │   ├── __init__.py
+│   │   │   ├── login.py              # Login logic
+│   │   │   └── jwt_handler.py        # JWT token management
+│   │   ├── ui/
+│   │   │   ├── __init__.py
+│   │   │   ├── main_window.py        # Main application window
+│   │   │   ├── session_view.py       # Session tracking UI
+│   │   │   └── break_notification.py # Break reminder UI
+│   │   ├── core/
+│   │   │   ├── __init__.py
+│   │   │   ├── session_manager.py    # Session control logic
+│   │   │   ├── time_engine.py        # Work/break time tracking
+│   │   │   └── break_manager.py      # Break token management
+│   │   ├── detection/
+│   │   │   ├── __init__.py
+│   │   │   ├── input_collector.py    # Keyboard/mouse metadata
+│   │   │   ├── abnormality_detector.py # Detection algorithms
+│   │   │   └── pattern_analyzer.py   # Pattern analysis
+│   │   ├── storage/
+│   │   │   ├── __init__.py
+│   │   │   ├── local_db.py           # SQLite operations
+│   │   │   ├── encryption.py         # Data encryption
+│   │   │   └── models.py             # Database models
+│   │   ├── sync/
+│   │   │   ├── __init__.py
+│   │   │   ├── sync_client.py        # Backend sync logic
+│   │   │   └── offline_queue.py      # Offline operation queue
+│   │   ├── config/
+│   │   │   ├── __init__.py
+│   │   │   └── settings.py           # Configuration
+│   │   └── utils/
+│   │       ├── __init__.py
+│   │       └── helpers.py            # Utility functions
+│   ├── requirements.txt
+│   ├── .env.example
+│   └── README.md
+│
+├── backend/                          # Backend API Server (FastAPI)
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── main.py                   # FastAPI application
+│   │   ├── api/
+│   │   │   ├── __init__.py
+│   │   │   ├── auth.py               # Authentication endpoints
+│   │   │   ├── sessions.py           # Session endpoints
+│   │   │   ├── abnormalities.py      # Abnormality endpoints
+│   │   │   ├── employees.py          # Employee management
+│   │   │   ├── reports.py            # Report generation
+│   │   │   └── websocket.py          # WebSocket handlers
+│   │   ├── core/
+│   │   │   ├── __init__.py
+│   │   │   ├── config.py             # App configuration
+│   │   │   ├── security.py           # JWT & password hashing
+│   │   │   └── database.py           # Database connection
+│   │   ├── models/
+│   │   │   ├── __init__.py
+│   │   │   ├── employee.py           # Employee model
+│   │   │   ├── session.py            # Session model
+│   │   │   ├── abnormality.py        # Abnormality model
+│   │   │   ├── admin_action.py       # AdminAction model
+│   │   │   └── report.py             # Report model
+│   │   ├── schemas/
+│   │   │   ├── __init__.py
+│   │   │   ├── auth.py               # Auth schemas
+│   │   │   ├── session.py            # Session schemas
+│   │   │   ├── employee.py           # Employee schemas
+│   │   │   └── abnormality.py        # Abnormality schemas
+│   │   ├── services/
+│   │   │   ├── __init__.py
+│   │   │   ├── session_service.py    # Session business logic
+│   │   │   ├── analytics_service.py  # Analytics calculations
+│   │   │   ├── report_service.py     # Report generation
+│   │   │   └── ml_service.py         # ML predictions
+│   │   ├── tasks/
+│   │   │   ├── __init__.py
+│   │   │   └── celery_tasks.py       # Background tasks
+│   │   └── utils/
+│   │       ├── __init__.py
+│   │       └── helpers.py
+│   ├── alembic/                      # Database migrations
+│   │   ├── versions/
+│   │   └── env.py
+│   ├── requirements.txt
+│   ├── .env.example
+│   ├── alembic.ini
+│   └── README.md
+│
+├── dashboard/                        # Admin Dashboard (React)
+│   ├── public/
+│   │   └── index.html
+│   ├── src/
+│   │   ├── App.jsx                   # Main app component
+│   │   ├── main.jsx                  # Entry point
+│   │   ├── components/
+│   │   │   ├── common/
+│   │   │   │   ├── Navbar.jsx
+│   │   │   │   ├── Sidebar.jsx
+│   │   │   │   └── Layout.jsx
+│   │   │   ├── sessions/
+│   │   │   │   ├── SessionList.jsx
+│   │   │   │   ├── SessionDetail.jsx
+│   │   │   │   └── LiveSessions.jsx
+│   │   │   ├── analytics/
+│   │   │   │   ├── ProductivityChart.jsx
+│   │   │   │   ├── HeatMap.jsx
+│   │   │   │   └── TrendAnalysis.jsx
+│   │   │   ├── employees/
+│   │   │   │   ├── EmployeeList.jsx
+│   │   │   │   └── EmployeeDetail.jsx
+│   │   │   ├── reports/
+│   │   │   │   ├── ReportGenerator.jsx
+│   │   │   │   └── ReportList.jsx
+│   │   │   └── abnormalities/
+│   │   │       ├── AbnormalityList.jsx
+│   │   │       └── ReviewPanel.jsx
+│   │   ├── pages/
+│   │   │   ├── Dashboard.jsx
+│   │   │   ├── Login.jsx
+│   │   │   ├── Sessions.jsx
+│   │   │   ├── Analytics.jsx
+│   │   │   ├── Employees.jsx
+│   │   │   ├── Reports.jsx
+│   │   │   └── Settings.jsx
+│   │   ├── services/
+│   │   │   ├── api.js                # API client
+│   │   │   ├── auth.js               # Auth service
+│   │   │   └── websocket.js          # WebSocket client
+│   │   ├── hooks/
+│   │   │   ├── useAuth.js
+│   │   │   ├── useSessions.js
+│   │   │   └── useWebSocket.js
+│   │   ├── store/
+│   │   │   ├── authStore.js          # Auth state
+│   │   │   └── sessionStore.js       # Session state
+│   │   └── utils/
+│   │       ├── constants.js
+│   │       └── helpers.js
+│   ├── package.json
+│   ├── vite.config.js
+│   ├── .env.example
+│   └── README.md
+│
+├── employee-portal/                  # Employee Self-Service (React)
+│   ├── public/
+│   ├── src/
+│   │   ├── App.jsx
+│   │   ├── main.jsx
+│   │   ├── components/
+│   │   │   ├── AttendanceCalendar.jsx
+│   │   │   ├── SessionHistory.jsx
+│   │   │   ├── ProductivityInsights.jsx
+│   │   │   └── AppealForm.jsx
+│   │   ├── pages/
+│   │   │   ├── Home.jsx
+│   │   │   ├── Login.jsx
+│   │   │   ├── Attendance.jsx
+│   │   │   ├── Insights.jsx
+│   │   │   └── Appeals.jsx
+│   │   ├── services/
+│   │   │   └── api.js
+│   │   └── utils/
+│   ├── package.json
+│   └── README.md
+│
+├── database/                         # Database setup
+│   ├── schema.sql                    # Initial schema
+│   ├── seed.sql                      # Sample data
+│   └── README.md
+│
+├── docs/                             # Documentation
+│   ├── API.md                        # API documentation
+│   ├── SETUP.md                      # Setup guide
+│   ├── ARCHITECTURE.md               # Architecture details
+│   └── USER_GUIDE.md                 # User manual
+│
+├── docker/                           # Docker configuration
+│   ├── docker-compose.yml
+│   ├── Dockerfile.backend
+│   └── Dockerfile.dashboard
+│
+├── scripts/                          # Utility scripts
+│   ├── setup.sh                      # Initial setup
+│   ├── start-dev.sh                  # Start dev environment
+│   └── deploy.sh                     # Deployment script
+│
+├── .gitignore
+├── README.md                         # Main project README
+└── LICENSE

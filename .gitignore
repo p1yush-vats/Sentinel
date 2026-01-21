@@ -1,0 +1,14 @@
+# virtual environments
+venv/
+backend/venv/
+desktop-app/venv/
+# environment variables
+
+
+# python cache
+__pycache__/
+*.pyc
+
+# editor noise
+.vscode/
+.idea/
