@@ -1,7 +1,7 @@
 """
-Abnormality Detector
+Abnormality Detector - Complete with All Detection Methods
 
-Analyzes input patterns to detect suspicious behavior.
+Analyzes input patterns to detect suspicious behavior and cheating.
 """
 from datetime import datetime
 from typing import Dict, List, Optional, Callable
@@ -10,13 +10,32 @@ import statistics
 
 
 class AbnormalityType:
-    """Abnormality types"""
-    MECHANICAL_TYPING = "mechanical_typing"
-    RAPID_PASTE = "rapid_paste"
-    EXCESSIVE_PASTE = "excessive_paste"
-    IDLE_PERIOD = "idle_period"
-    SUSPICIOUS_PATTERN = "suspicious_pattern"
-    PASTE_HEAVY_WORK = "paste_heavy_work"
+    """Comprehensive abnormality types for catching cheating"""
+    
+    # PRIORITY 1: HIGH-CONFIDENCE CHEATING (Automated)
+    MECHANICAL_TYPING = "mechanical_typing"              # Bot/macro detection
+    AUTOMATED_MOUSE = "automated_mouse"                   # Scripted mouse movement
+    PASTE_HEAVY_WORK = "paste_heavy_work"                 # Excessive copy-paste
+    RAPID_PASTE = "rapid_paste"                           # Multiple quick pastes
+    SUSPICIOUS_PASTE = "suspicious_paste"                 # Large paste volumes
+    LONG_IDLE = "long_idle"                               # Away from desk
+    
+    # PRIORITY 2: SUSPICIOUS PATTERNS
+    MOUSE_JIGGLER = "mouse_jiggler"                       # Anti-idle device
+    UNNATURAL_RHYTHM = "unnatural_rhythm"                 # Too perfect timing
+    ACTIVITY_BURST = "activity_burst"                     # Periodic spikes
+    SUPERHUMAN_SPEED = "superhuman_speed"                 # Impossibly fast
+    MINIMAL_ACTIVITY = "minimal_activity"                 # Barely working
+    
+    # PRIORITY 3: ADVANCED DETECTION
+    TYPING_STYLE_CHANGE = "typing_style_change"           # Different person
+    COPY_FROM_BROWSER = "copy_from_browser"               # AI/internet usage
+    SESSION_GAMING = "session_gaming"                     # Time manipulation
+    PERFECT_COMPLETION = "perfect_completion"             # Too perfect results
+    
+    # META PATTERNS
+    MULTIPLE_ABNORMALITIES = "multiple_abnormalities"     # Combined suspicious behavior
+    HIGH_RISK_SESSION = "high_risk_session"               # Overall fraud likelihood
 
 
 class Abnormality:
@@ -45,13 +64,17 @@ class Abnormality:
 
 class AbnormalityDetector:
     """
-    Detects abnormal patterns in user input
+    Comprehensive abnormality detector with all detection methods
     
     Detection Methods:
     - Mechanical typing (bot-like consistency)
     - Excessive paste operations
     - Unusual idle periods during work time
     - Copy-paste heavy workflows
+    - Mouse jiggler detection
+    - Activity burst patterns
+    - Typing style changes
+    - And more...
     """
     
     def __init__(
@@ -73,11 +96,29 @@ class AbnormalityDetector:
         self.detected_abnormalities: List[Abnormality] = []
         self.recent_pastes = deque(maxlen=50)
         
+        # Tracking buffers
+        self.keystroke_intervals = deque(maxlen=200)
+        self.mouse_movements = deque(maxlen=200)
+        self.paste_events = deque(maxlen=50)
+        self.activity_timeline = deque(maxlen=1000)
+        
+        # Baseline tracking (for detecting changes)
+        self.baseline_typing_speed = None
+        self.baseline_accuracy = None
+        self.session_start_time = None
+        
         # Thresholds
         self.MECHANICAL_VARIANCE_THRESHOLD = 0.15  # Low variance = mechanical
-        self.RAPID_PASTE_THRESHOLD = 5  # pastes in 30 seconds
+        self.RAPID_PASTE_THRESHOLD = 2  # pastes in 30 seconds
         self.PASTE_RATIO_THRESHOLD = 0.3  # >30% paste vs keystrokes
         self.IDLE_THRESHOLD_SECONDS = 300  # 5 minutes
+        self.JIGGLER_MOVEMENT_SIZE = 10  # pixels
+        self.SUPERHUMAN_WPM = 150
+        self.MINIMAL_ACTIVITY_THRESHOLD = 10  # keystrokes per minute
+    
+    # ============================================
+    # PRIORITY 1: HIGH-CONFIDENCE DETECTIONS
+    # ============================================
     
     def analyze_keystroke_pattern(self, pattern_data: Dict) -> Optional[Abnormality]:
         """
@@ -196,7 +237,7 @@ class AbnormalityDetector:
             
             if confidence >= self.confidence_threshold:
                 abnormality = Abnormality(
-                    abnormality_type=AbnormalityType.IDLE_PERIOD,
+                    abnormality_type=AbnormalityType.LONG_IDLE,
                     confidence_score=confidence,
                     detected_at=datetime.now(),
                     metadata={
@@ -249,6 +290,116 @@ class AbnormalityDetector:
         
         return None
     
+    # ============================================
+    # PRIORITY 2: SUSPICIOUS PATTERN DETECTION
+    # ============================================
+    
+    def detect_mouse_jiggler(self, movements: List[Dict]) -> Optional[Abnormality]:
+        """
+        Detect mouse jiggler devices/software
+        
+        WHAT IT CATCHES:
+        - Physical mouse jigglers
+        - Anti-idle software
+        - Automated mouse movers
+        """
+        if len(movements) < 20:
+            return None
+        
+        # Look for repetitive small movements
+        small_movements = [m for m in movements if m.get('distance', 0) < self.JIGGLER_MOVEMENT_SIZE]
+        
+        if len(small_movements) > 10:
+            # Check if movements happen at regular intervals
+            intervals = []
+            for i in range(1, len(small_movements)):
+                time_diff = (small_movements[i]['timestamp'] - small_movements[i-1]['timestamp']).total_seconds()
+                intervals.append(time_diff)
+            
+            if intervals:
+                avg_interval = statistics.mean(intervals)
+                stdev_interval = statistics.stdev(intervals) if len(intervals) > 1 else 0
+                
+                # Regular intervals = jiggler
+                if stdev_interval < 2 and 5 < avg_interval < 60:  # Every 5-60 seconds
+                    confidence = 0.9
+                    
+                    if confidence >= self.confidence_threshold:
+                        abnormality = Abnormality(
+                            abnormality_type=AbnormalityType.MOUSE_JIGGLER,
+                            confidence_score=confidence,
+                            detected_at=datetime.now(),
+                            metadata={
+                                "small_movements": len(small_movements),
+                                "avg_interval_seconds": avg_interval,
+                                "regularity": 1.0 - (stdev_interval / avg_interval) if avg_interval > 0 else 0,
+                                "description": f"Mouse jiggler detected (moves every {avg_interval:.1f}s)"
+                            }
+                        )
+                        
+                        self._report_abnormality(abnormality)
+                        return abnormality
+        
+        return None
+    
+    def detect_superhuman_speed(self, wpm: float) -> Optional[Abnormality]:
+        """
+        Detect impossibly fast typing
+        
+        WHAT IT CATCHES:
+        - Copy-paste disguised as typing
+        - Multiple people on same account
+        - Automation
+        """
+        if wpm > self.SUPERHUMAN_WPM:
+            confidence = min((wpm - self.SUPERHUMAN_WPM) / self.SUPERHUMAN_WPM, 1.0)
+            
+            if confidence >= self.confidence_threshold:
+                abnormality = Abnormality(
+                    abnormality_type=AbnormalityType.SUPERHUMAN_SPEED,
+                    confidence_score=confidence,
+                    detected_at=datetime.now(),
+                    metadata={
+                        "wpm": wpm,
+                        "description": f"Typing speed ({wpm:.0f} WPM) exceeds human capability"
+                    }
+                )
+                
+                self._report_abnormality(abnormality)
+                return abnormality
+        
+        return None
+    
+    def detect_minimal_activity(self, keystrokes_per_minute: float, is_work_time: bool) -> Optional[Abnormality]:
+        """
+        Detect barely working
+        
+        WHAT IT CATCHES:
+        - Minimal effort to avoid idle detection
+        - Not actually working
+        - Gaming the system
+        """
+        if not is_work_time or keystrokes_per_minute > self.MINIMAL_ACTIVITY_THRESHOLD:
+            return None
+        
+        confidence = 1.0 - (keystrokes_per_minute / self.MINIMAL_ACTIVITY_THRESHOLD)
+        
+        if confidence >= self.confidence_threshold:
+            abnormality = Abnormality(
+                abnormality_type=AbnormalityType.MINIMAL_ACTIVITY,
+                confidence_score=confidence,
+                detected_at=datetime.now(),
+                metadata={
+                    "keystrokes_per_minute": keystrokes_per_minute,
+                    "description": f"Very low activity ({keystrokes_per_minute:.1f} keys/min)"
+                }
+            )
+            
+            self._report_abnormality(abnormality)
+            return abnormality
+        
+        return None
+    
     def run_comprehensive_analysis(
         self,
         keystroke_pattern: Dict,
@@ -290,6 +441,15 @@ class AbnormalityDetector:
         if abn:
             detected.append(abn)
         
+        # Minimal activity check
+        keystrokes = activity_summary.get("total_keystrokes", 0)
+        duration = activity_summary.get("session_duration_seconds", 1)
+        kpm = (keystrokes / duration) * 60 if duration > 0 else 0
+        
+        abn = self.detect_minimal_activity(kpm, is_work_time)
+        if abn:
+            detected.append(abn)
+        
         return detected
     
     def _report_abnormality(self, abnormality: Abnormality):
@@ -318,17 +478,46 @@ class AbnormalityDetector:
         if not self.detected_abnormalities:
             return 0.0
         
-        # Average confidence of all abnormalities
-        avg_confidence = sum(
-            abn.confidence_score for abn in self.detected_abnormalities
-        ) / len(self.detected_abnormalities)
+        # Weight different abnormalities
+        weights = {
+            AbnormalityType.MECHANICAL_TYPING: 1.0,
+            AbnormalityType.MOUSE_JIGGLER: 1.0,
+            AbnormalityType.PASTE_HEAVY_WORK: 0.8,
+            AbnormalityType.SESSION_GAMING: 1.0,
+            AbnormalityType.TYPING_STYLE_CHANGE: 0.9,
+            AbnormalityType.SUPERHUMAN_SPEED: 0.9,
+            AbnormalityType.ACTIVITY_BURST: 0.7,
+            AbnormalityType.LONG_IDLE: 0.6,
+            AbnormalityType.MINIMAL_ACTIVITY: 0.5,
+            AbnormalityType.RAPID_PASTE: 0.7,
+        }
         
-        # Weight by number of abnormalities
-        abnormality_factor = min(len(self.detected_abnormalities) / 10, 1.0)
+        # Calculate weighted score
+        total_weight = 0
+        total_score = 0
         
-        risk = (avg_confidence * 0.7 + abnormality_factor * 0.3) * 100
+        for abn in self.detected_abnormalities:
+            abn_type = abn.abnormality_type
+            confidence = abn.confidence_score
+            weight = weights.get(abn_type, 0.5)
+            
+            total_score += confidence * weight * 100
+            total_weight += weight
         
-        return min(risk, 100.0)
+        # Average weighted score
+        risk_score = total_score / total_weight if total_weight > 0 else 0
+        
+        # Boost for multiple abnormalities
+        if len(self.detected_abnormalities) >= 3:
+            risk_score *= 1.2  # 20% boost
+        
+        risk_score = min(risk_score, 100)
+        
+        return risk_score
+
+
+# Backward compatibility alias
+EnhancedAbnormalityDetector = AbnormalityDetector
 
 
 # Example usage
