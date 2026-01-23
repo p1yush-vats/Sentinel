@@ -216,6 +216,20 @@ class InputCollector:
         except Exception as e:
             print(f"Error in paste detection: {e}")
     
+    def get_detailed_activity(self) -> Dict:
+    
+    keystrokes = list(self.keystroke_intervals)
+    pastes = list(self.paste_events)
+    mouse = list(self.mouse_movements)
+    
+    return {
+        'keystroke_intervals': keystrokes,
+        'paste_events': pastes,
+        'mouse_movements': mouse,
+        'total_keystrokes': self.stats['total_keystrokes'],
+        'total_pastes': self.stats['total_pastes'],
+        'total_mouse_movements': self.stats['total_mouse_movements']
+    }
     def _get_time_since_last_paste(self) -> Optional[float]:
         """Get seconds since last paste"""
         if len(self.paste_events) > 0:
