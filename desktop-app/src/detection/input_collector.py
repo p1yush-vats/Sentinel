@@ -216,8 +216,12 @@ class InputCollector:
         except Exception as e:
             print(f"Error in paste detection: {e}")
     
-    def get_detailed_activity(self) -> Dict:
+def get_detailed_activity(self) -> Dict:
+    """
+    🔥 NEW: Get detailed activity data for feeding to detector
     
+    Returns all collected data in a format the detector can consume
+    """
     keystrokes = list(self.keystroke_intervals)
     pastes = list(self.paste_events)
     mouse = list(self.mouse_movements)
@@ -230,78 +234,6 @@ class InputCollector:
         'total_pastes': self.stats['total_pastes'],
         'total_mouse_movements': self.stats['total_mouse_movements']
     }
-    def _get_time_since_last_paste(self) -> Optional[float]:
-        """Get seconds since last paste"""
-        if len(self.paste_events) > 0:
-            last = self.paste_events[-1]["timestamp"]
-            return (datetime.now() - last).total_seconds()
-        return None
-    
-    def get_keystroke_pattern(self) -> Dict:
-        """
-        Analyze keystroke timing patterns
-        
-        Returns:
-            Pattern analysis (NO actual keystrokes)
-        """
-        if len(self.keystroke_intervals) < 10:
-            return {"status": "insufficient_data"}
-        
-        intervals = list(self.keystroke_intervals)
-        
-        # Calculate statistics
-        avg_interval = sum(intervals) / len(intervals)
-        min_interval = min(intervals)
-        max_interval = max(intervals)
-        
-        # Calculate variance
-        variance = sum((x - avg_interval) ** 2 for x in intervals) / len(intervals)
-        std_dev = variance ** 0.5
-        
-        # Detect mechanical patterns (very consistent timing = bot-like)
-        consistency = std_dev / avg_interval if avg_interval > 0 else 0
-        
-        return {
-            "avg_interval_ms": round(avg_interval, 2),
-            "min_interval_ms": min_interval,
-            "max_interval_ms": max_interval,
-            "std_deviation": round(std_dev, 2),
-            "consistency_score": round(consistency, 3),
-            "sample_size": len(intervals),
-            "mechanical_suspected": consistency < 0.2  # Very low variance = suspicious
-        }
-    
-    def get_activity_summary(self) -> Dict:
-        """Get activity summary"""
-        if not self.stats["session_start"]:
-            return {"status": "not_started"}
-        
-        session_duration = (datetime.now() - self.stats["session_start"]).total_seconds()
-        
-        # Calculate activity rate
-        keystroke_rate = self.stats["total_keystrokes"] / session_duration if session_duration > 0 else 0
-        
-        # Check for idle periods
-        idle_seconds = 0
-        if self.stats["last_activity"]:
-            idle_seconds = (datetime.now() - self.stats["last_activity"]).total_seconds()
-        
-        return {
-            "session_duration_seconds": round(session_duration, 1),
-            "total_keystrokes": self.stats["total_keystrokes"],
-            "total_mouse_movements": self.stats["total_mouse_movements"],
-            "total_pastes": self.stats["total_pastes"],
-            "keystroke_rate_per_minute": round(keystroke_rate * 60, 1),
-            "idle_seconds": round(idle_seconds, 1),
-            "is_active": idle_seconds < 60
-        }
-    
-    def clear_buffers(self):
-        """Clear all event buffers"""
-        self.keystroke_intervals.clear()
-        self.mouse_movements.clear()
-        self.paste_events.clear()
-
 
 # Example usage
 if __name__ == "__main__":
