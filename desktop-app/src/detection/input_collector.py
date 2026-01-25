@@ -121,33 +121,42 @@ class InputCollector:
         print("✓ Input collector stopped")
     
     def _on_key_press(self, key):
-        """Handle key press (NO CONTENT RECORDED)"""
+        """Handle key press (NO CONTENT RECORDED) - FIXED"""
         try:
             now = datetime.now()
             
             # Track modifier keys for paste detection
             if key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
                 self.ctrl_pressed = True
+                return  # Don't count modifiers as keystrokes
             if key == keyboard.Key.cmd:
                 self.cmd_pressed = True
+                return
             
-            # Detect paste (Ctrl+V or Cmd+V)
-            if (self.ctrl_pressed or self.cmd_pressed) and \
-               (hasattr(key, 'char') and key.char == 'v'):
-                self._on_paste_detected()
+            # FIXED: Detect paste (Ctrl+V or Cmd+V)
+            try:
+                if (self.ctrl_pressed or self.cmd_pressed):
+                    if hasattr(key, 'char') and key.char and key.char.lower() == 'v':
+                        print("🔍 Ctrl/Cmd+V detected!")
+                        self._on_paste_detected()
+                        return  # Don't count paste as regular keystroke
+            except AttributeError:
+                pass
             
-            # Record timing interval (NOT the key itself)
+            # Record timing interval for regular keystrokes
             if self.last_keystroke_time:
                 interval_ms = int((now - self.last_keystroke_time).total_seconds() * 1000)
-                self.keystroke_intervals.append(interval_ms)
+                if interval_ms > 0:  # Ignore duplicate events
+                    self.keystroke_intervals.append(interval_ms)
             
             self.last_keystroke_time = now
             self.stats["total_keystrokes"] += 1
             self.stats["last_activity"] = now
             
         except Exception as e:
-            print(f"Error in key handler: {e}")
-    
+            print(f"❌ Error in key handler: {e}")
+            import traceback
+            traceback.print_exc() 
     def _on_key_release(self, key):
         """Handle key release"""
         try:
@@ -192,27 +201,30 @@ class InputCollector:
             pass
     
     def _on_paste_detected(self):
-        """Handle paste detection (NO CONTENT)"""
+        """Handle paste detection (NO CONTENT) - FIXED"""
         try:
             now = datetime.now()
             
+            # Add to paste events
             self.paste_events.append({
                 "timestamp": now,
-                "size": 100,  # Estimated size (we can't know actual size)
+                "size": 100,  # Estimated size
                 "interval_since_last": self._get_time_since_last_paste()
             })
             
             self.stats["total_pastes"] += 1
             self.last_paste_time = now
             
-            # Trigger pattern detection
+            # IMPORTANT: Print to confirm detection
+            print(f"📋 PASTE detected! Total pastes: {self.stats['total_pastes']}")
+            
+            # Trigger pattern detection callback
             if self.on_pattern_detected:
-                # Check if suspicious paste pattern
+                # Check for rapid paste pattern
                 if len(self.paste_events) >= 3:
                     recent_pastes = list(self.paste_events)[-3:]
                     time_span = (recent_pastes[-1]["timestamp"] - recent_pastes[0]["timestamp"]).total_seconds()
                     
-                    # 3+ pastes in 10 seconds = suspicious
                     if time_span < 10:
                         self.on_pattern_detected({
                             "type": "rapid_paste",
@@ -221,8 +233,9 @@ class InputCollector:
                         })
         
         except Exception as e:
-            print(f"Error in paste detection: {e}")
-    
+            print(f"❌ Error in paste detection: {e}")
+            import traceback
+            traceback.print_exc()
     def _get_time_since_last_paste(self) -> Optional[float]:
         """Get seconds since last paste"""
         if self.last_paste_time:
