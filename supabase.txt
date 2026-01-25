@@ -1,0 +1,237 @@
+-- SENTINEL Database Schema
+-- PostgreSQL 14+
+
+-- Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- Employees Table
+CREATE TABLE employees (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    full_name VARCHAR(255) NOT NULL,
+    role VARCHAR(50) NOT NULL DEFAULT 'employee', -- 'employee', 'admin', 'super_admin'
+    department VARCHAR(100),
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Sessions Table
+CREATE TABLE sessions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    start_time TIMESTAMP NOT NULL,
+    end_time TIMESTAMP,
+    total_work_minutes INTEGER DEFAULT 0,
+    total_break_minutes INTEGER DEFAULT 0,
+    lunch_taken BOOLEAN DEFAULT false,
+    status VARCHAR(50) DEFAULT 'active', -- 'active', 'completed', 'flagged', 'contested'
+    session_quality_score DECIMAL(5,2),
+    risk_score DECIMAL(5,2) DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_sessions_employee ON sessions(employee_id);
+CREATE INDEX idx_sessions_start_time ON sessions(start_time);
+CREATE INDEX idx_sessions_status ON sessions(status);
+
+-- Work Time Logs Table
+CREATE TABLE work_time_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    log_type VARCHAR(50) NOT NULL, -- 'work', 'break', 'lunch'
+    start_time TIMESTAMP NOT NULL,
+    end_time TIMESTAMP,
+    duration_minutes INTEGER,
+    break_token_used BOOLEAN DEFAULT false,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_work_logs_session ON work_time_logs(session_id);
+CREATE INDEX idx_work_logs_type ON work_time_logs(log_type);
+
+-- Abnormalities Table
+CREATE TABLE abnormalities (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    abnormality_type VARCHAR(100) NOT NULL, -- 'mechanical_typing', 'automation', 'suspicious_paste', etc.
+    confidence_score DECIMAL(5,2) NOT NULL,
+    detected_at TIMESTAMP NOT NULL,
+    metadata JSONB, -- Additional detection details
+    reviewed BOOLEAN DEFAULT false,
+    reviewed_by UUID REFERENCES employees(id),
+    reviewed_at TIMESTAMP,
+    review_decision VARCHAR(50), -- 'dismissed', 'warning_issued', 'escalated'
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_abnormalities_session ON abnormalities(session_id);
+CREATE INDEX idx_abnormalities_employee ON abnormalities(employee_id);
+CREATE INDEX idx_abnormalities_type ON abnormalities(abnormality_type);
+CREATE INDEX idx_abnormalities_reviewed ON abnormalities(reviewed);
+
+-- Admin Actions Table
+CREATE TABLE admin_actions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    admin_id UUID NOT NULL REFERENCES employees(id),
+    employee_id UUID NOT NULL REFERENCES employees(id),
+    session_id UUID REFERENCES sessions(id),
+    action_type VARCHAR(100) NOT NULL, -- 'warning_issued', 'session_flagged', 'appeal_approved', etc.
+    justification TEXT NOT NULL,
+    metadata JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_admin_actions_admin ON admin_actions(admin_id);
+CREATE INDEX idx_admin_actions_employee ON admin_actions(employee_id);
+CREATE INDEX idx_admin_actions_type ON admin_actions(action_type);
+
+-- Productivity Metrics Table
+CREATE TABLE productivity_metrics (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    hour_of_day INTEGER, -- 0-23
+    activity_intensity DECIMAL(5,2), -- 0-100
+    break_effectiveness_score DECIMAL(5,2),
+    keystroke_count INTEGER,
+    mouse_movement_count INTEGER,
+    paste_count INTEGER,
+    recorded_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_metrics_session ON productivity_metrics(session_id);
+CREATE INDEX idx_metrics_employee ON productivity_metrics(employee_id);
+
+-- Reports Table
+CREATE TABLE reports (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    report_type VARCHAR(100) NOT NULL, -- 'daily_attendance', 'weekly_productivity', etc.
+    generated_by UUID NOT NULL REFERENCES employees(id),
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    filters JSONB,
+    file_path VARCHAR(500),
+    file_format VARCHAR(20), -- 'pdf', 'excel', 'csv'
+    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_reports_type ON reports(report_type);
+CREATE INDEX idx_reports_dates ON reports(start_date, end_date);
+
+-- Work Rules Configuration Table
+CREATE TABLE work_rules (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    department VARCHAR(100),
+    employee_id UUID REFERENCES employees(id), -- NULL means applies to all
+    work_minutes_per_hour INTEGER DEFAULT 50,
+    break_minutes_per_hour INTEGER DEFAULT 10,
+    lunch_duration_minutes INTEGER DEFAULT 30,
+    daily_work_target_minutes INTEGER DEFAULT 400,
+    detection_sensitivity VARCHAR(20) DEFAULT 'medium', -- 'low', 'medium', 'high'
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Appeals Table
+CREATE TABLE appeals (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    abnormality_id UUID REFERENCES abnormalities(id),
+    reason TEXT NOT NULL,
+    status VARCHAR(50) DEFAULT 'pending', -- 'pending', 'approved', 'rejected'
+    reviewed_by UUID REFERENCES employees(id),
+    reviewed_at TIMESTAMP,
+    admin_response TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_appeals_employee ON appeals(employee_id);
+CREATE INDEX idx_appeals_status ON appeals(status);
+
+-- Audit Log Table (Immutable)
+CREATE TABLE audit_log (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    event_type VARCHAR(100) NOT NULL,
+    actor_id UUID REFERENCES employees(id),
+    target_id UUID, -- Generic reference
+    target_type VARCHAR(50), -- 'session', 'employee', 'abnormality', etc.
+    action VARCHAR(100) NOT NULL,
+    metadata JSONB,
+    ip_address INET,
+    user_agent TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_audit_event_type ON audit_log(event_type);
+CREATE INDEX idx_audit_actor ON audit_log(actor_id);
+CREATE INDEX idx_audit_created ON audit_log(created_at);
+
+-- Notification Preferences Table
+CREATE TABLE notification_preferences (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    email_notifications BOOLEAN DEFAULT true,
+    break_reminders BOOLEAN DEFAULT true,
+    weekly_reports BOOLEAN DEFAULT false,
+    abnormality_alerts BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create updated_at trigger function
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Apply triggers to tables with updated_at
+CREATE TRIGGER update_employees_updated_at BEFORE UPDATE ON employees
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_sessions_updated_at BEFORE UPDATE ON sessions
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_work_rules_updated_at BEFORE UPDATE ON work_rules
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_notification_prefs_updated_at BEFORE UPDATE ON notification_preferences
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Insert default admin user (password: Admin@123 - CHANGE IN PRODUCTION)
+INSERT INTO employees (email, password_hash, full_name, role, department)
+VALUES (
+    'admin@sentinel.com',
+    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5aqWZVZZZZZZZ', -- bcrypt hash
+    'System Administrator',
+    'super_admin',
+    'Administration'
+);
+
+-- Insert sample employee (password: Employee@123)
+INSERT INTO employees (email, password_hash, full_name, role, department)
+VALUES (
+    'employee@sentinel.com',
+    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5aqWZVZZZZZZZ',
+    'Test Employee',
+    'employee',
+    'Engineering'
+);
+
+-- Insert default work rules
+INSERT INTO work_rules (department, work_minutes_per_hour, break_minutes_per_hour, lunch_duration_minutes, daily_work_target_minutes)
+VALUES ('Engineering', 50, 10, 30, 400);
+
+COMMENT ON TABLE employees IS 'Stores employee information and authentication credentials';
+COMMENT ON TABLE sessions IS 'Tracks work sessions with timing and quality metrics';
+COMMENT ON TABLE abnormalities IS 'Logs detected abnormal input patterns';
+COMMENT ON TABLE admin_actions IS 'Audit trail of all administrative actions';
+COMMENT ON TABLE audit_log IS 'Immutable system-wide audit log';
