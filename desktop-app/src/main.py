@@ -1,5 +1,5 @@
 """
-SENTINEL Desktop Application - FIXED DETECTION v2
+SENTINEL Desktop Application - FIXED v3
 Main entry point with properly working abnormality detection
 """
 import sys
@@ -435,7 +435,7 @@ class SentinelApp:
             print(f"❌ Resume failed: {e}")
     
     def start_integrated_session(self):
-        """Start session with full integration - FIXED"""
+        """Start session with full integration"""
         if self.session_manager.time_engine.state.value != 'idle':
             print("⚠️ Session already running locally")
             if self.main_window:
@@ -477,7 +477,7 @@ class SentinelApp:
                         status='active'
                     )
             
-            # 🔥 CRITICAL FIX: Start detection AFTER session starts
+            # Start detection AFTER session starts
             print("\n🔍 Starting abnormality detection...")
             self.start_detection()
             
@@ -500,7 +500,7 @@ class SentinelApp:
                 )
     
     def start_detection(self):
-        """🔥 FIXED: Start input collection and detection with proper integration"""
+        """Start input collection and detection"""
         if self.detection_running:
             print("⚠️ Detection already running")
             return
@@ -534,7 +534,7 @@ class SentinelApp:
         print("✅ Enhanced detection pipeline fully active!")
     
     def stop_detection(self):
-        """🔥 FIXED: Stop detection"""
+        """Stop detection"""
         if not self.detection_running:
             return
         
@@ -546,10 +546,10 @@ class SentinelApp:
         print("  ✓ Detection stopped")
     
     def _detection_loop(self):
-        """🔥 COMPLETELY REWRITTEN: Background detection loop with proper data flow"""
+        """Background detection loop"""
         print("🔄 Enhanced detection loop running...")
         
-        analysis_interval = 60  # Run analysis every 60 seconds
+        analysis_interval = 60
         last_analysis = datetime.now()
         
         while self.detection_running:
@@ -560,25 +560,22 @@ class SentinelApp:
                 state = self.session_manager.get_current_state()
                 is_working = state['state'] == 'working'
                 
-                # === FEED DATA FROM INPUT COLLECTOR TO DETECTOR ===
-                
-                # Get detailed activity from input collector
+                # Feed data from input collector to detector
                 activity_data = self.input_collector.get_detailed_activity()
                 
-                # Feed keystroke intervals to detector
+                # Feed keystroke intervals
                 for interval in activity_data.get('keystroke_intervals', []):
                     self.abnormality_detector.track_keystroke(interval)
                 
-                # Feed paste events to detector
+                # Feed paste events
                 for paste_event in activity_data.get('paste_events', []):
                     size = paste_event.get('size', 0)
                     if size == 0:
-                        size = 100  # Default estimate if size not available
+                        size = 100
                     self.abnormality_detector.track_paste(size)
                 
-                # Feed mouse movements to detector
+                # Feed mouse movements
                 for mouse_event in activity_data.get('mouse_movements', []):
-                    # Calculate distance (use interval as proxy)
                     distance = mouse_event.get('distance', 10)
                     self.abnormality_detector.track_mouse_movement(distance)
                 
@@ -622,7 +619,6 @@ class SentinelApp:
                 import traceback
                 traceback.print_exc()
             
-            # Wait before next check (check every 10 seconds)
             time.sleep(10)
         
         print("⏹️ Detection loop stopped")
@@ -811,93 +807,87 @@ class SentinelApp:
             self.abnormality_detector.clear_session()
             self.input_collector.clear_buffers()
             self.current_session_id = None
-            # Change button to Logout after session ends
-            if self.main_window:
-                self.main_window.session_button.configure(
-                    text="Logout",
-                    command=self.logout,
-                    fg_color="#6B7280",
-                    hover_color="#4B5563"
-                )
             
         except Exception as e:
             print(f"❌ Session end failed: {e}")
             import traceback
             traceback.print_exc()
+    
+    def logout(self):
+        """Logout user and return to login screen"""
+        print("\n🚪 Logging out...")
+        
+        # Stop detection if running
+        self.stop_detection()
+        
+        # Clear saved tokens
+        self.jwt_handler.clear_tokens()
+        
+        # Close main window
+        if self.main_window:
+            self.main_window.destroy()
+        
+        # Reset user data
+        self.user = None
+        self.access_token = None
+        self.current_session_id = None
+        
+        print("✓ Logged out successfully")
+        
+        # Show login window again
+        self.show_login()
+    
+    # ============================================
+    # CALLBACK METHODS (NOW INSIDE THE CLASS!)
+    # ============================================
+    
+    def on_session_state_change(self, state, data):
+        """Handle session state changes"""
+        print(f"📊 Session state: {state.value}")
+        
+        # Update UI if main window exists
+        if self.main_window:
+            self.main_window.update_state_ui(state, data)
+    
+    def on_sync_complete(self, summary):
+        """Handle sync completion"""
+        print(f"✓ Sync complete: {summary['sessions_synced']} sessions, "
+              f"{summary['abnormalities_synced']} abnormalities")
+    
+    def on_sync_error(self, error):
+        """Handle sync errors"""
+        print(f"⚠️ Sync error: {error}")
+    
+    def on_pattern_detected(self, pattern):
+        """Handle detected input patterns"""
+        print(f"🔍 Pattern detected: {pattern['type']}")
+        print(f"   Confidence: {pattern.get('confidence', 0)}")
+        print(f"   Details: {pattern.get('details', 'N/A')}")
+        
+        # Update UI to show pattern detection
+        if self.main_window:
+            self.main_window.after(0, lambda: self.main_window.status_label.configure(
+                text=f"🔍 Pattern: {pattern['type']}",
+                text_color="#60A5FA"
+            ))
+    
+    def on_abnormality_detected(self, abnormality: Abnormality):
+        """Handle detected abnormalities"""
+        print(f"\n🚨 ABNORMALITY DETECTED!")
+        print(f"   Type: {abnormality.abnormality_type}")
+        print(f"   Confidence: {abnormality.confidence_score:.2%}")
+        print(f"   Description: {abnormality.metadata.get('description', 'N/A')}")
+        
+        # Show notification in UI
+        if self.main_window:
+            self.main_window.after(0, lambda: self.main_window.status_label.configure(
+                text=f"⚠️ {abnormality.abnormality_type} ({abnormality.confidence_score:.0%})",
+                text_color="#F59E0B"
+            ))
 
-def logout(self):
-    """Logout user and return to login screen"""
-    print("\n🚪 Logging out...")
-    
-    # Stop detection if running
-    self.stop_detection()
-    
-    # Clear saved tokens
-    self.jwt_handler.clear_tokens()
-    
-    # Close main window
-    if self.main_window:
-        self.main_window.destroy()
-    
-    # Reset user data
-    self.user = None
-    self.access_token = None
-    self.current_session_id = None
-    
-    print("✓ Logged out successfully")
-    
-    # Show login window again
-    self.show_login()
-
-# ============================================
-# CALLBACK METHODS
-# ============================================
-
-def on_session_state_change(self, state, data):
-    """Handle session state changes"""
-    print(f"📊 Session state: {state.value}")
-    
-    # Update UI if main window exists
-    if self.main_window:
-        self.main_window.update_state_ui(state, data)
-
-def on_sync_complete(self, summary):
-    """Handle sync completion"""
-    print(f"✓ Sync complete: {summary['sessions_synced']} sessions, "
-          f"{summary['abnormalities_synced']} abnormalities")
-
-def on_sync_error(self, error):
-    """Handle sync errors"""
-    print(f"⚠️ Sync error: {error}")
-
-def on_pattern_detected(self, pattern):
-    """Handle detected input patterns"""
-    print(f"🔍 Pattern detected: {pattern['type']}")
-    print(f"   Confidence: {pattern.get('confidence', 0)}")
-    print(f"   Details: {pattern.get('details', 'N/A')}")
-    
-    # Update UI to show pattern detection
-    if self.main_window:
-        self.main_window.after(0, lambda: self.main_window.status_label.configure(
-            text=f"🔍 Pattern: {pattern['type']}",
-            text_color="#60A5FA"
-        ))
-
-def on_abnormality_detected(self, abnormality: Abnormality):
-    """Handle detected abnormalities"""
-    print(f"\n🚨 ABNORMALITY DETECTED!")
-    print(f"   Type: {abnormality.abnormality_type}")
-    print(f"   Confidence: {abnormality.confidence_score:.2%}")
-    print(f"   Description: {abnormality.metadata.get('description', 'N/A')}")
-    
-    # Show notification in UI
-    if self.main_window:
-        self.main_window.after(0, lambda: self.main_window.status_label.configure(
-            text=f"⚠️ {abnormality.abnormality_type} ({abnormality.confidence_score:.0%})",
-            text_color="#F59E0B"
-        ))
 
 def main():
+    """Main entry point"""
     try:
         # Ensure directories exist
         Config.ensure_dirs()
