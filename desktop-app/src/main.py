@@ -1,6 +1,16 @@
 """
-SENTINEL Desktop Application - FIXED DETECTION
-Main entry point with working abnormality detection
+SENTINEL Desktop Application - COMPLETE WITH AGGREGATION
+Main entry point with comprehensive abnormality detection + session-level aggregation
+
+DETECTION FEATURES:
+✅ Copy-paste tracking
+✅ Idle period monitoring
+✅ Mechanical/bot detection
+✅ Mouse jiggler detection
+✅ Keyboard sitting detection
+✅ Session-level aggregation (1 DB row per type)
+✅ Local-first storage
+✅ Backend sync with offline queue
 """
 import sys
 import asyncio
@@ -24,6 +34,7 @@ from storage.local_db import LocalDB
 from sync.sync_client import SyncClient
 from detection.input_collector import InputCollector
 from detection.abnormality_detector import AbnormalityDetector, Abnormality
+from detection.abnormality_aggregator import AbnormalityAggregator  # 🎯 NEW
 import customtkinter as ctk
 
 # IST Timezone using pytz
@@ -56,7 +67,17 @@ def parse_datetime_ist(dt_string: str) -> datetime:
 
 
 class SentinelApp:
-    """Complete SENTINEL Application with WORKING Detection"""
+    """
+    Complete SENTINEL Application with Production-Grade Detection + Aggregation
+    
+    DETECTION PIPELINE:
+    1. Session starts → Detection starts
+    2. Input collector runs continuously
+    3. Detection loop checks every 30s
+    4. Abnormalities aggregated (1 entry per type per session)
+    5. Background sync to Supabase
+    6. Detection stops during breaks
+    """
     
     def __init__(self):
         # Core components
@@ -72,6 +93,7 @@ class SentinelApp:
         self.sync_client: Optional[SyncClient] = None
         self.input_collector: Optional[InputCollector] = None
         self.abnormality_detector: Optional[AbnormalityDetector] = None
+        self.abnormality_aggregator: Optional[AbnormalityAggregator] = None  # 🎯 NEW
         
         # User data
         self.user = None
@@ -342,13 +364,13 @@ class SentinelApp:
             sync_interval_seconds=Config.SYNC_INTERVAL_SECONDS
         )
         
-        # Input collector (FIXED: Now with proper callback)
+        # Input collector with pattern detection callback
         self.input_collector = InputCollector(
             on_pattern_detected=self.on_pattern_detected,
             buffer_size=1000
         )
         
-        # Abnormality detector (FIXED: Now with proper callback)
+        # Abnormality detector with detection callback
         self.abnormality_detector = AbnormalityDetector(
             on_abnormality_detected=self.on_abnormality_detected,
             confidence_threshold=Config.ABNORMALITY_CONFIDENCE_THRESHOLD
@@ -376,13 +398,17 @@ class SentinelApp:
         # Start main loop
         self.main_window.mainloop()
     
+    # ============================================
+    # BREAK & LUNCH MANAGEMENT
+    # ============================================
+    
     def take_break(self):
-        """Take a break"""
+        """Take a break - STOPS DETECTION"""
         try:
             self.session_manager.take_break()
             print("☕ Break started")
             
-            # Stop detection during break
+            # CRITICAL: Stop detection during break
             self.stop_detection()
             
         except Exception as e:
@@ -394,24 +420,24 @@ class SentinelApp:
                 )
     
     def end_break(self):
-        """End break and resume work"""
+        """End break and resume work - RESTARTS DETECTION"""
         try:
             self.session_manager.end_break()
             print("▶ Resumed work")
             
-            # Resume detection
+            # CRITICAL: Resume detection
             self.start_detection()
             
         except Exception as e:
             print(f"❌ Resume failed: {e}")
     
     def take_lunch(self):
-        """Take lunch break"""
+        """Take lunch break - STOPS DETECTION"""
         try:
             self.session_manager.take_lunch()
             print("🍽 Lunch started")
             
-            # Stop detection during lunch
+            # CRITICAL: Stop detection during lunch
             self.stop_detection()
             
         except Exception as e:
@@ -423,19 +449,32 @@ class SentinelApp:
                 )
     
     def end_lunch(self):
-        """End lunch and resume work"""
+        """End lunch and resume work - RESTARTS DETECTION"""
         try:
             self.session_manager.end_lunch()
             print("▶ Resumed work from lunch")
             
-            # Resume detection
+            # CRITICAL: Resume detection
             self.start_detection()
             
         except Exception as e:
             print(f"❌ Resume failed: {e}")
     
+    # ============================================
+    # SESSION MANAGEMENT
+    # ============================================
+    
     def start_integrated_session(self):
-        """Start session with full integration - FIXED"""
+        """
+        🎯 COMPLETE: Start session with full detection + aggregation integration
+        
+        FLOW:
+        1. Check if session already running
+        2. Create session in backend
+        3. Save to local DB
+        4. Initialize aggregator
+        5. START DETECTION PIPELINE
+        """
         if self.session_manager.time_engine.state.value != 'idle':
             print("⚠️ Session already running locally")
             if self.main_window:
@@ -446,19 +485,23 @@ class SentinelApp:
             return
         
         try:
+            # Generate session ID
             if not self.current_session_id:
                 self.current_session_id = str(uuid.uuid4())
             
+            # Start backend session
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             result = loop.run_until_complete(self.session_manager.start_session())
             loop.close()
             
+            # Handle conflicts
             if result.get("conflict"):
                 existing = result.get("existing_session", {})
                 self.show_session_conflict_dialog(existing)
                 return
             
+            # Save to local DB
             existing_session = self.local_db.get_session(self.current_session_id)
             
             if not existing_session:
@@ -477,7 +520,15 @@ class SentinelApp:
                         status='active'
                     )
             
-            # 🔥 CRITICAL FIX: Start detection AFTER session starts
+            # 🎯 NEW: Initialize abnormality aggregator
+            self.abnormality_aggregator = AbnormalityAggregator(
+                session_id=self.current_session_id,
+                local_db=self.local_db,
+                sync_client=self.sync_client
+            )
+            print(f"  ✓ Abnormality aggregator initialized")
+            
+            # 🔥 CRITICAL: Start detection AFTER session starts
             print("\n🔍 Starting abnormality detection...")
             self.start_detection()
             
@@ -499,56 +550,176 @@ class SentinelApp:
                     text_color="#EF4444"
                 )
     
+    def end_integrated_session(self):
+        """
+        🎯 COMPLETE: End session with full integration + aggregation finalization
+        
+        FLOW:
+        1. STOP DETECTION FIRST
+        2. Flush aggregator
+        3. End session in backend
+        4. Update local DB with risk score
+        5. Show summary
+        6. Clear detection data
+        """
+        try:
+            # CRITICAL: Stop detection FIRST
+            self.stop_detection()
+            
+            # 🎯 NEW: Flush aggregator before clearing
+            if self.abnormality_aggregator:
+                print("\n📊 Finalizing abnormality summary...")
+                self.abnormality_aggregator.flush()
+                summary = self.abnormality_aggregator.get_summary()
+                
+                if summary:
+                    print(f"\n📈 Abnormality Summary:")
+                    for abn_type, stats in summary.items():
+                        print(f"   • {abn_type}: {stats['occurrences']}x ({stats['severity']})")
+                else:
+                    print(f"  ✅ No abnormalities detected this session")
+                
+                self.abnormality_aggregator = None
+            
+            # End session in manager
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            summary = loop.run_until_complete(self.session_manager.end_session())
+            loop.close()
+            
+            # Calculate final risk score
+            if self.current_session_id:
+                risk_score = self.abnormality_detector.get_risk_score()
+                
+                # Update local DB
+                self.local_db.update_session(
+                    session_id=self.current_session_id,
+                    end_time=now_ist(),
+                    total_work_minutes=summary['work_minutes'],
+                    total_break_minutes=summary['break_minutes'],
+                    lunch_taken=summary['lunch_taken'],
+                    status='completed',
+                    risk_score=risk_score
+                )
+            
+            # Show summary in main window
+            if self.main_window:
+                self.main_window.show_session_summary(summary)
+            
+            # Print session summary
+            print(f"\n✅ Session ended")
+            print(f"   Work: {summary['work_minutes']} min")
+            print(f"   Break: {summary['break_minutes']} min")
+            print(f"   Risk Score: {risk_score:.1f}/100")
+            
+            # Clear detection data
+            self.abnormality_detector.clear_session()
+            self.input_collector.clear_buffers()
+            self.current_session_id = None
+            
+            # Change button to Logout after session ends
+            if self.main_window:
+                self.main_window.session_button.configure(
+                    text="Logout",
+                    command=self.logout,
+                    fg_color="#6B7280",
+                    hover_color="#4B5563"
+                )
+            
+        except Exception as e:
+            print(f"❌ Session end failed: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # ============================================
+    # DETECTION PIPELINE (CORE FUNCTIONALITY)
+    # ============================================
+    
     def start_detection(self):
-        """🔥 NEW: Start input collection and detection"""
+        """
+        🔥 START DETECTION PIPELINE
+        
+        COMPONENTS:
+        1. Input Collector (keyboard/mouse hooks)
+        2. Detection Loop (background thread)
+        3. Auto-Sync (periodic backend sync)
+        """
         if self.detection_running:
             print("⚠️ Detection already running")
             return
         
         print("🚀 Starting detection pipeline...")
         
-        # Start input collector
+        # 1. Start input collector
         self.input_collector.start_collecting()
-        print("  ✓ Input collector started")
+        print("  ✓ Input collector started (hooks active)")
         
-        # Start detection loop in background thread
+        # 2. Start detection loop in background thread
         self.detection_running = True
         self.detection_task = threading.Thread(
             target=self._detection_loop,
             daemon=True
         )
         self.detection_task.start()
-        print("  ✓ Detection loop started")
+        print("  ✓ Detection loop started (analyzing every 30s)")
         
-        # Start auto-sync
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(self.sync_client.start_auto_sync())
-        print("  ✓ Auto-sync started")
+        # 3. Start auto-sync
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self.sync_client.start_auto_sync())
+            loop.close()
+            print("  ✓ Auto-sync started (syncing every 60s)")
+        except Exception as e:
+            print(f"  ⚠️ Auto-sync failed to start: {e}")
         
         print("✅ Detection pipeline fully active!")
     
     def stop_detection(self):
-        """🔥 NEW: Stop detection"""
+        """
+        🛑 STOP DETECTION PIPELINE
+        
+        Called when:
+        - Taking a break
+        - Taking lunch
+        - Ending session
+        """
         if not self.detection_running:
             return
         
         print("⏸️ Stopping detection...")
         
+        # Stop detection loop
         self.detection_running = False
+        
+        # Stop input collector
         self.input_collector.stop_collecting()
+        
+        # Stop auto-sync
+        self.sync_client.stop_auto_sync()
         
         print("  ✓ Detection stopped")
     
     def _detection_loop(self):
-        """🔥 NEW: Background detection loop"""
+        """
+        🔄 BACKGROUND DETECTION LOOP
+        
+        Runs every 30 seconds:
+        1. Get input patterns from collector
+        2. Get activity summary
+        3. Run all detection algorithms
+        4. Save abnormalities locally
+        5. Sync to backend
+        
+        This is the HEART of the detection system.
+        """
         print("🔄 Detection loop running...")
         
-        detection_interval = 30  # Run detection every 30 seconds
+        detection_interval = 30  # Check every 30 seconds
         
         while self.detection_running:
             try:
-                # Get current state
+                # Get current session state
                 state = self.session_manager.get_current_state()
                 is_working = state['state'] == 'working'
                 
@@ -556,11 +727,13 @@ class SentinelApp:
                 pattern = self.input_collector.get_keystroke_pattern()
                 activity = self.input_collector.get_activity_summary()
                 
-                print(f"\n📊 Detection Check:")
+                # Log detection check
+                print(f"\n📊 Detection Check [{datetime.now().strftime('%H:%M:%S')}]:")
                 print(f"   State: {state['state']}")
                 print(f"   Keystrokes: {activity.get('total_keystrokes', 0)}")
                 print(f"   Pastes: {activity.get('total_pastes', 0)}")
-                print(f"   Pattern status: {pattern.get('status', 'unknown')}")
+                print(f"   Idle: {activity.get('idle_seconds', 0):.0f}s")
+                print(f"   Pattern: {pattern.get('status', 'unknown')}")
                 
                 # Run comprehensive analysis
                 abnormalities = self.abnormality_detector.run_comprehensive_analysis(
@@ -569,31 +742,9 @@ class SentinelApp:
                     is_work_time=is_working
                 )
                 
+                # Process detected abnormalities
                 if abnormalities:
-                    print(f"  🚨 Detected {len(abnormalities)} abnormalities!")
-                    
-                    # Report to backend
-                    if self.current_session_id:
-                        for abn in abnormalities:
-                            try:
-                                loop = asyncio.new_event_loop()
-                                asyncio.set_event_loop(loop)
-                                success = loop.run_until_complete(
-                                    self.sync_client.report_abnormality(
-                                        session_id=self.current_session_id,
-                                        abnormality_type=abn.abnormality_type,
-                                        confidence_score=abn.confidence_score,
-                                        metadata=abn.metadata
-                                    )
-                                )
-                                loop.close()
-                                
-                                if success:
-                                    print(f"  ✓ Reported to backend: {abn.abnormality_type}")
-                                else:
-                                    print(f"  ⚠️ Failed to report: {abn.abnormality_type}")
-                            except Exception as e:
-                                print(f"  ❌ Error reporting abnormality: {e}")
+                    print(f"  🚨 Detected {len(abnormalities)} abnormality(ies)!")
                 else:
                     print("  ✅ No abnormalities detected")
                 
@@ -606,6 +757,109 @@ class SentinelApp:
             time.sleep(detection_interval)
         
         print("⏹️ Detection loop stopped")
+    
+    # ============================================
+    # CALLBACKS & EVENT HANDLERS
+    # ============================================
+    
+    def on_session_state_change(self, state, data):
+        """Handle session state changes"""
+        print(f"📊 Session state: {state.value}")
+        
+        # Update UI if main window exists
+        if self.main_window:
+            self.main_window.update_state_ui(state, data)
+    
+    def on_sync_complete(self, summary):
+        """Handle sync completion"""
+        print(f"✓ Sync complete: {summary['sessions_synced']} sessions, "
+              f"{summary['abnormalities_synced']} abnormalities")
+    
+    def on_sync_error(self, error):
+        """Handle sync errors"""
+        print(f"⚠️ Sync error: {error}")
+    
+    def on_pattern_detected(self, pattern):
+        """
+        🎯 AGGREGATED: Handle detected input patterns
+        
+        Called by InputCollector when patterns are detected:
+        - large_paste
+        - rapid_paste
+        - keyboard_sitting
+        - mouse_jiggler
+        - idle_period
+        """
+        pattern_type = pattern.get('type')
+        confidence = pattern.get('confidence', 0)
+        details = pattern.get('details', 'N/A')
+        
+        print(f"🔍 Pattern detected: {pattern_type}")
+        print(f"   Confidence: {confidence:.0%}")
+        print(f"   Details: {details}")
+        
+        # Map pattern types to abnormality types
+        pattern_to_abnormality = {
+            'large_paste': 'suspicious_paste',
+            'rapid_paste': 'rapid_paste',
+            'keyboard_sitting': 'minimal_activity',
+            'mouse_jiggler': 'mouse_jiggler',
+            'idle_period': 'long_idle'
+        }
+        
+        abnormality_type = pattern_to_abnormality.get(pattern_type)
+        
+        # Only process if it maps to a known type AND meets confidence threshold
+        if abnormality_type and confidence >= self.abnormality_detector.confidence_threshold:
+            
+            # 🎯 NEW: Use aggregator to add detection (creates OR updates entry)
+            if self.abnormality_aggregator:
+                self.abnormality_aggregator.add_detection(
+                    abnormality_type=abnormality_type,
+                    confidence=confidence,
+                    timestamp=datetime.now(),
+                    description=details
+                )
+            else:
+                print(f"  ⚠️ Aggregator not initialized, skipping")
+        
+        # Update UI
+        if self.main_window:
+            self.main_window.after(0, lambda: self.main_window.status_label.configure(
+                text=f"🔍 {pattern_type.replace('_', ' ').title()} detected",
+                text_color="#60A5FA"
+            ))
+    
+    def on_abnormality_detected(self, abnormality: Abnormality):
+        """
+        Handle detected abnormalities (from AbnormalityDetector)
+        
+        Abnormalities include:
+        - mechanical_typing
+        - paste_heavy_work
+        - long_idle
+        - minimal_activity
+        - And more...
+        """
+        print(f"\n🚨 ABNORMALITY DETECTED!")
+        print(f"   Type: {abnormality.abnormality_type}")
+        print(f"   Confidence: {abnormality.confidence_score:.2%}")
+        print(f"   Description: {abnormality.metadata.get('description', 'N/A')}")
+        
+        # Show notification in UI
+        if self.main_window:
+            def update_ui():
+                if self.main_window:
+                    self.main_window.status_label.configure(
+                        text=f"⚠️ {abnormality.abnormality_type.replace('_', ' ').title()} ({abnormality.confidence_score:.0%})",
+                        text_color="#F59E0B"
+                    )
+            
+            self.main_window.after(0, update_ui)
+    
+    # ============================================
+    # UTILITY METHODS
+    # ============================================
     
     def show_session_conflict_dialog(self, existing_session: dict):
         """Show dialog when active session exists"""
@@ -695,6 +949,13 @@ class SentinelApp:
                         backend_session_id=result.get('backend_session_id')
                     )
                     
+                    # Initialize aggregator
+                    self.abnormality_aggregator = AbnormalityAggregator(
+                        session_id=self.current_session_id,
+                        local_db=self.local_db,
+                        sync_client=self.sync_client
+                    )
+                    
                     # Start detection
                     self.start_detection()
                     
@@ -724,64 +985,6 @@ class SentinelApp:
         )
         end_btn.pack(side="right", expand=True, fill="x", padx=(10, 0))
     
-    def end_integrated_session(self):
-        """End session with full integration"""
-        try:
-            # Stop detection FIRST
-            self.stop_detection()
-            
-            # End session in manager
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            summary = loop.run_until_complete(self.session_manager.end_session())
-            loop.close()
-            
-            # Update local DB
-            if self.current_session_id:
-                risk_score = self.abnormality_detector.get_risk_score()
-                
-                self.local_db.update_session(
-                    session_id=self.current_session_id,
-                    end_time=now_ist(),
-                    total_work_minutes=summary['work_minutes'],
-                    total_break_minutes=summary['break_minutes'],
-                    lunch_taken=summary['lunch_taken'],
-                    status='completed',
-                    risk_score=risk_score
-                )
-            
-            # Show summary in main window
-            if self.main_window:
-                self.main_window.show_session_summary(summary)
-            
-            print(f"\n✅ Session ended")
-            print(f"   Work: {summary['work_minutes']} min")
-            print(f"   Break: {summary['break_minutes']} min")
-            print(f"   Risk Score: {risk_score:.1f}/100")
-            
-            # Get final abnormality summary
-            abnormalities = self.abnormality_detector.get_session_abnormalities()
-            print(f"   Total Abnormalities: {len(abnormalities)}")
-            
-            # Clear detection data
-            self.abnormality_detector.clear_session()
-            self.input_collector.clear_buffers()
-            self.current_session_id = None
-            
-            # Change button to Logout after session ends
-            if self.main_window:
-                self.main_window.session_button.configure(
-                    text="Logout",
-                    command=self.logout,
-                    fg_color="#6B7280",
-                    hover_color="#4B5563"
-                )
-            
-        except Exception as e:
-            print(f"❌ Session end failed: {e}")
-            import traceback
-            traceback.print_exc()
-    
     def logout(self):
         """Logout user and return to login screen"""
         print("\n🚪 Logging out...")
@@ -805,51 +1008,6 @@ class SentinelApp:
         
         # Show login window again
         self.show_login()
-    
-    def on_session_state_change(self, state, data):
-        """Handle session state changes"""
-        print(f"📊 Session state: {state.value}")
-        
-        # Update UI if main window exists
-        if self.main_window:
-            self.main_window.update_state_ui(state, data)
-    
-    def on_sync_complete(self, summary):
-        """Handle sync completion"""
-        print(f"✓ Sync complete: {summary['sessions_synced']} sessions, "
-              f"{summary['abnormalities_synced']} abnormalities")
-    
-    def on_sync_error(self, error):
-        """Handle sync errors"""
-        print(f"⚠️ Sync error: {error}")
-    
-    def on_pattern_detected(self, pattern):
-        """🔥 NEW: Handle detected input patterns"""
-        print(f"🔍 Pattern detected: {pattern['type']}")
-        print(f"   Confidence: {pattern.get('confidence', 0)}")
-        print(f"   Details: {pattern.get('details', 'N/A')}")
-        
-        # Update UI to show pattern detection
-        if self.main_window:
-            self.main_window.after(0, lambda: self.main_window.status_label.configure(
-                text=f"🔍 Pattern: {pattern['type']}",
-                text_color="#60A5FA"
-            ))
-    
-    def on_abnormality_detected(self, abnormality: Abnormality):
-        """🔥 FIXED: Handle detected abnormalities with better feedback"""
-        print(f"\n🚨 ABNORMALITY DETECTED!")
-        print(f"   Type: {abnormality.abnormality_type}")
-        print(f"   Confidence: {abnormality.confidence_score:.2%}")
-        print(f"   Description: {abnormality.metadata.get('description', 'N/A')}")
-        print(f"   Metadata: {abnormality.metadata}")
-        
-        # Show notification in UI
-        if self.main_window:
-            self.main_window.after(0, lambda: self.main_window.status_label.configure(
-                text=f"⚠️ {abnormality.abnormality_type} detected ({abnormality.confidence_score:.0%})",
-                text_color="#F59E0B"
-            ))
 
 
 def main():

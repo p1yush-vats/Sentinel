@@ -1,5 +1,5 @@
 """
-Abnormality Detector - Complete with All Detection Methods
+Abnormality Detector - Complete with Large Paste Detection
 
 Analyzes input patterns to detect suspicious behavior and cheating.
 """
@@ -17,7 +17,7 @@ class AbnormalityType:
     AUTOMATED_MOUSE = "automated_mouse"                   # Scripted mouse movement
     PASTE_HEAVY_WORK = "paste_heavy_work"                 # Excessive copy-paste
     RAPID_PASTE = "rapid_paste"                           # Multiple quick pastes
-    SUSPICIOUS_PASTE = "suspicious_paste"                 # Large paste volumes
+    SUSPICIOUS_PASTE = "suspicious_paste"                 # Large paste volumes (NEW)
     LONG_IDLE = "long_idle"                               # Away from desk
     
     # PRIORITY 2: SUSPICIOUS PATTERNS
@@ -69,6 +69,7 @@ class AbnormalityDetector:
     Detection Methods:
     - Mechanical typing (bot-like consistency)
     - Excessive paste operations
+    - Large paste detection (300+ characters)
     - Unusual idle periods during work time
     - Copy-paste heavy workflows
     - Mouse jiggler detection
@@ -111,6 +112,7 @@ class AbnormalityDetector:
         self.MECHANICAL_VARIANCE_THRESHOLD = 0.15  # Low variance = mechanical
         self.RAPID_PASTE_THRESHOLD = 2  # pastes in 30 seconds
         self.PASTE_RATIO_THRESHOLD = 0.3  # >30% paste vs keystrokes
+        self.LARGE_PASTE_RATIO_THRESHOLD = 0.5  # >50% of pastes are large
         self.IDLE_THRESHOLD_SECONDS = 300  # 5 minutes
         self.JIGGLER_MOVEMENT_SIZE = 10  # pixels
         self.SUPERHUMAN_WPM = 150
@@ -204,6 +206,51 @@ class AbnormalityDetector:
                         "total_pastes": total_pastes,
                         "total_keystrokes": total_keystrokes,
                         "description": f"Work is {int(paste_ratio*100)}% paste operations"
+                    }
+                )
+                
+                self._report_abnormality(abnormality)
+                return abnormality
+        
+        return None
+    
+    def analyze_large_paste_behavior(
+        self,
+        total_large_pastes: int,
+        total_pastes: int,
+        session_duration_seconds: float
+    ) -> Optional[Abnormality]:
+        """
+        Analyze large paste behavior (NEW)
+        
+        Args:
+            total_large_pastes: Number of large pastes (300+ chars)
+            total_pastes: Total paste operations
+            session_duration_seconds: Session duration
+        
+        Returns:
+            Abnormality if detected
+        """
+        if session_duration_seconds < 60 or total_pastes == 0:
+            return None
+        
+        # Calculate large paste ratio
+        large_paste_ratio = total_large_pastes / total_pastes
+        
+        # If >50% of pastes are large = suspicious
+        if large_paste_ratio > self.LARGE_PASTE_RATIO_THRESHOLD and total_large_pastes >= 3:
+            confidence = min(large_paste_ratio, 1.0)
+            
+            if confidence >= self.confidence_threshold:
+                abnormality = Abnormality(
+                    abnormality_type=AbnormalityType.SUSPICIOUS_PASTE,
+                    confidence_score=confidence,
+                    detected_at=datetime.now(),
+                    metadata={
+                        "large_paste_ratio": round(large_paste_ratio, 3),
+                        "total_large_pastes": total_large_pastes,
+                        "total_pastes": total_pastes,
+                        "description": f"{int(large_paste_ratio*100)}% of pastes are large (300+ characters)"
                     }
                 )
                 
@@ -433,6 +480,15 @@ class AbnormalityDetector:
         if abn:
             detected.append(abn)
         
+        # Large paste check (NEW)
+        abn = self.analyze_large_paste_behavior(
+            total_large_pastes=activity_summary.get("total_large_pastes", 0),
+            total_pastes=activity_summary.get("total_pastes", 0),
+            session_duration_seconds=activity_summary.get("session_duration_seconds", 0)
+        )
+        if abn:
+            detected.append(abn)
+        
         # Idle period check
         abn = self.analyze_idle_period(
             idle_seconds=activity_summary.get("idle_seconds", 0),
@@ -483,6 +539,7 @@ class AbnormalityDetector:
             AbnormalityType.MECHANICAL_TYPING: 1.0,
             AbnormalityType.MOUSE_JIGGLER: 1.0,
             AbnormalityType.PASTE_HEAVY_WORK: 0.8,
+            AbnormalityType.SUSPICIOUS_PASTE: 0.9,  # NEW: High weight for large pastes
             AbnormalityType.SESSION_GAMING: 1.0,
             AbnormalityType.TYPING_STYLE_CHANGE: 0.9,
             AbnormalityType.SUPERHUMAN_SPEED: 0.9,
@@ -518,38 +575,3 @@ class AbnormalityDetector:
 
 # Backward compatibility alias
 EnhancedAbnormalityDetector = AbnormalityDetector
-
-
-# Example usage
-if __name__ == "__main__":
-    def on_detected(abnormality: Abnormality):
-        print(f"\n🚨 ABNORMALITY DETECTED!")
-        print(f"   Type: {abnormality.abnormality_type}")
-        print(f"   Confidence: {abnormality.confidence_score:.2%}")
-        print(f"   Details: {abnormality.metadata.get('description')}")
-    
-    detector = AbnormalityDetector(
-        on_abnormality_detected=on_detected,
-        confidence_threshold=0.7
-    )
-    
-    # Test mechanical typing
-    print("Testing mechanical typing pattern...")
-    pattern = {
-        "avg_interval_ms": 100,
-        "consistency_score": 0.1,  # Very consistent = mechanical
-        "std_deviation": 10,
-        "sample_size": 100
-    }
-    detector.analyze_keystroke_pattern(pattern)
-    
-    # Test paste heavy work
-    print("\nTesting paste-heavy work...")
-    detector.analyze_paste_behavior(
-        total_pastes=50,
-        total_keystrokes=50,
-        session_duration_seconds=300
-    )
-    
-    # Get risk score
-    print(f"\n📊 Overall Risk Score: {detector.get_risk_score():.1f}/100")

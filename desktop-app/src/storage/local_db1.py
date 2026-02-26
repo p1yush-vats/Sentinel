@@ -1,5 +1,5 @@
 """
-Local Database - SQLite Storage - COMPLETE VERSION WITH AGGREGATION SUPPORT
+Local Database - SQLite Storage
 
 Stores session data locally for offline capability.
 """
@@ -314,47 +314,6 @@ class LocalDB:
         
         return abnormality_id
     
-    def update_abnormality(
-        self,
-        abnormality_id: str,
-        confidence_score: Optional[float] = None,
-        metadata: Optional[Dict] = None
-    ):
-        """
-        🎯 NEW: Update existing abnormality (for aggregation)
-        
-        This method is REQUIRED for session-level aggregation to work.
-        It updates an existing abnormality entry instead of creating a new one.
-        """
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        updates = []
-        values = []
-        
-        if confidence_score is not None:
-            updates.append("confidence_score = ?")
-            values.append(confidence_score)
-        
-        if metadata is not None:
-            updates.append("metadata = ?")
-            values.append(json.dumps(metadata))
-        
-        if updates:
-            # Mark as unsynced after update
-            updates.append("synced = 0")
-            values.append(abnormality_id)
-            
-            cursor.execute(f"""
-                UPDATE abnormalities 
-                SET {', '.join(updates)}
-                WHERE id = ?
-            """, values)
-            
-            conn.commit()
-        
-        conn.close()
-    
     def get_session_abnormalities(self, session_id: str) -> List[Dict]:
         """Get abnormalities for a session"""
         conn = self._get_connection()
@@ -407,6 +366,41 @@ class LocalDB:
         """, (abnormality_id,))
         
         conn.commit()
+        conn.close()
+    
+    def update_abnormality(
+        self,
+        abnormality_id: str,
+        confidence_score: Optional[float] = None,
+        metadata: Optional[Dict] = None
+    ):
+        """Update existing abnormality (for aggregation)"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        updates = []
+        values = []
+        
+        if confidence_score is not None:
+            updates.append("confidence_score = ?")
+            values.append(confidence_score)
+        
+        if metadata is not None:
+            updates.append("metadata = ?")
+            values.append(json.dumps(metadata))
+        
+        if updates:
+            updates.append("synced = 0")
+            values.append(abnormality_id)
+            
+            cursor.execute(f"""
+                UPDATE abnormalities 
+                SET {', '.join(updates)}
+                WHERE id = ?
+            """, values)
+            
+            conn.commit()
+        
         conn.close()
     
     # ============ SYNC QUEUE ============
@@ -509,15 +503,6 @@ if __name__ == "__main__":
     
     print(f"✓ Abnormality created: {abn_id}")
     
-    # Update abnormality (NEW METHOD)
-    db.update_abnormality(
-        abnormality_id=abn_id,
-        confidence_score=0.90,
-        metadata={"description": "Updated abnormality", "occurrences": 2}
-    )
-    
-    print(f"✓ Abnormality updated: {abn_id}")
-    
     # Get session
     session = db.get_session(session_id)
     print(f"✓ Session retrieved: {session['id']}")
@@ -525,4 +510,3 @@ if __name__ == "__main__":
     # Get abnormalities
     abnormalities = db.get_session_abnormalities(session_id)
     print(f"✓ Abnormalities: {len(abnormalities)}")
-    print(f"   First abnormality metadata: {abnormalities[0]['metadata']}")
