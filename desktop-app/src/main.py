@@ -1,5 +1,5 @@
 """
-SENTINEL Desktop Application - COMPLETE WITH AGGREGATION
+SENTINEL Desktop Application - COMPLETE WITH DUAL SYNC + AGGREGATION
 Main entry point with comprehensive abnormality detection + session-level aggregation
 
 DETECTION FEATURES:
@@ -9,8 +9,10 @@ DETECTION FEATURES:
 ✅ Mouse jiggler detection
 ✅ Keyboard sitting detection
 ✅ Session-level aggregation (1 DB row per type)
-✅ Local-first storage
-✅ Backend sync with offline queue
+✅ Local-first storage (SQLite always written first)
+✅ Backend sync via SyncClient background flush (dual sync)
+✅ Detection pauses during breaks/lunch
+✅ Final sync_all() on session end to guarantee no data loss
 """
 import sys
 import asyncio
@@ -34,7 +36,7 @@ from storage.local_db import LocalDB
 from sync.sync_client import SyncClient
 from detection.input_collector import InputCollector
 from detection.abnormality_detector import AbnormalityDetector, Abnormality
-from detection.abnormality_aggregator import AbnormalityAggregator  # 🎯 NEW
+from detection.abnormality_aggregator import AbnormalityAggregator
 import customtkinter as ctk
 
 # IST Timezone using pytz
@@ -68,15 +70,20 @@ def parse_datetime_ist(dt_string: str) -> datetime:
 
 class SentinelApp:
     """
-    Complete SENTINEL Application with Production-Grade Detection + Aggregation
-    
+    Complete SENTINEL Application with Production-Grade Detection + Dual Sync
+
     DETECTION PIPELINE:
     1. Session starts → Detection starts
     2. Input collector runs continuously
     3. Detection loop checks every 30s
     4. Abnormalities aggregated (1 entry per type per session)
-    5. Background sync to Supabase
+    5. Dual sync: SQLite instantly + Supabase backend on interval
     6. Detection stops during breaks
+
+    SYNC ARCHITECTURE:
+      Layer 1 (instant): AbnormalityAggregator → SQLite (always, no internet needed)
+      Layer 2 (interval): SyncClient background flush → Supabase every 60s
+      Layer 3 (on close): sync_all() called at session end, forced final flush
     """
     
     def __init__(self):
@@ -93,7 +100,7 @@ class SentinelApp:
         self.sync_client: Optional[SyncClient] = None
         self.input_collector: Optional[InputCollector] = None
         self.abnormality_detector: Optional[AbnormalityDetector] = None
-        self.abnormality_aggregator: Optional[AbnormalityAggregator] = None  # 🎯 NEW
+        self.abnormality_aggregator: Optional[AbnormalityAggregator] = None
         
         # User data
         self.user = None
@@ -353,7 +360,9 @@ class SentinelApp:
             on_sync_error=self.on_sync_error
         )
         
-        # Sync client
+        # Sync client — dual sync engine
+        # Layer 1 (instant): local SQLite via save_abnormality_locally()
+        # Layer 2 (interval): background flush thread to Supabase
         self.sync_client = SyncClient(
             api_base_url=Config.API_BASE_URL,
             access_token=self.access_token,
@@ -363,6 +372,10 @@ class SentinelApp:
             on_sync_error=self.on_sync_error,
             sync_interval_seconds=Config.SYNC_INTERVAL_SECONDS
         )
+        
+        # Start background flush immediately after login so any
+        # leftover unsynced records from previous sessions are caught
+        self.sync_client.start_background_flush()
         
         # Input collector with pattern detection callback
         self.input_collector = InputCollector(
@@ -466,13 +479,13 @@ class SentinelApp:
     
     def start_integrated_session(self):
         """
-        🎯 COMPLETE: Start session with full detection + aggregation integration
-        
+        🎯 COMPLETE: Start session with full detection + dual sync integration
+
         FLOW:
         1. Check if session already running
         2. Create session in backend
         3. Save to local DB
-        4. Initialize aggregator
+        4. Initialize AbnormalityAggregator (delegates sync to SyncClient)
         5. START DETECTION PIPELINE
         """
         if self.session_manager.time_engine.state.value != 'idle':
@@ -520,7 +533,9 @@ class SentinelApp:
                         status='active'
                     )
             
-            # 🎯 NEW: Initialize abnormality aggregator
+            # Initialize abnormality aggregator
+            # NOTE: Aggregator delegates all backend sync to SyncClient.
+            # No own sync queue or background thread in aggregator anymore.
             self.abnormality_aggregator = AbnormalityAggregator(
                 session_id=self.current_session_id,
                 local_db=self.local_db,
@@ -552,46 +567,63 @@ class SentinelApp:
     
     def end_integrated_session(self):
         """
-        🎯 COMPLETE: End session with full integration + aggregation finalization
-        
+        🎯 COMPLETE: End session with full integration + dual sync finalization
+
         FLOW:
         1. STOP DETECTION FIRST
-        2. Flush aggregator
-        3. End session in backend
-        4. Update local DB with risk score
-        5. Show summary
-        6. Clear detection data
+        2. Flush aggregator (logs final summary)
+        3. Force sync_all() — push all remaining unsynced SQLite records to backend
+        4. End session in backend
+        5. Update local DB with final stats + risk score
+        6. Show summary in UI
+        7. Clear detection data
+        8. Stop background flush thread
         """
         try:
-            # CRITICAL: Stop detection FIRST
+            # 1. CRITICAL: Stop detection FIRST
             self.stop_detection()
             
-            # 🎯 NEW: Flush aggregator before clearing
+            # 2. Flush aggregator before clearing
             if self.abnormality_aggregator:
                 print("\n📊 Finalizing abnormality summary...")
                 self.abnormality_aggregator.flush()
-                summary = self.abnormality_aggregator.get_summary()
+                abn_summary = self.abnormality_aggregator.get_summary()
                 
-                if summary:
+                if abn_summary:
                     print(f"\n📈 Abnormality Summary:")
-                    for abn_type, stats in summary.items():
+                    for abn_type, stats in abn_summary.items():
                         print(f"   • {abn_type}: {stats['occurrences']}x ({stats['severity']})")
                 else:
                     print(f"  ✅ No abnormalities detected this session")
                 
                 self.abnormality_aggregator = None
             
-            # End session in manager
+            # 3. Force-flush all remaining unsynced records before session closes
+            # This guarantees nothing is left behind even if backend was offline
+            print("\n🔄 Final sync before closing session...")
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                final_sync = loop.run_until_complete(self.sync_client.sync_all())
+                loop.close()
+                print(f"  ✅ Final sync: {final_sync['abnormalities_synced']} abnormalities, "
+                      f"{final_sync['sessions_synced']} sessions flushed to backend")
+                if final_sync.get('errors'):
+                    print(f"  ⚠️ {len(final_sync['errors'])} item(s) still unsynced "
+                          f"(will retry on next login)")
+            except Exception as e:
+                print(f"  ⚠️ Final sync error (data still safe in local DB): {e}")
+            
+            # 4. End session in manager / backend
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             summary = loop.run_until_complete(self.session_manager.end_session())
             loop.close()
             
-            # Calculate final risk score
+            # 5. Calculate final risk score and update local DB
             if self.current_session_id:
                 risk_score = self.abnormality_detector.get_risk_score()
                 
-                # Update local DB
                 self.local_db.update_session(
                     session_id=self.current_session_id,
                     end_time=now_ist(),
@@ -602,20 +634,23 @@ class SentinelApp:
                     risk_score=risk_score
                 )
             
-            # Show summary in main window
+            # 6. Show summary in main window
             if self.main_window:
                 self.main_window.show_session_summary(summary)
             
-            # Print session summary
+            # Print session summary to console
             print(f"\n✅ Session ended")
             print(f"   Work: {summary['work_minutes']} min")
             print(f"   Break: {summary['break_minutes']} min")
             print(f"   Risk Score: {risk_score:.1f}/100")
             
-            # Clear detection data
+            # 7. Clear detection data
             self.abnormality_detector.clear_session()
             self.input_collector.clear_buffers()
             self.current_session_id = None
+            
+            # 8. Stop background flush — no more syncing needed after session
+            self.sync_client.stop_background_flush()
             
             # Change button to Logout after session ends
             if self.main_window:
@@ -638,11 +673,14 @@ class SentinelApp:
     def start_detection(self):
         """
         🔥 START DETECTION PIPELINE
-        
+
         COMPONENTS:
         1. Input Collector (keyboard/mouse hooks)
-        2. Detection Loop (background thread)
-        3. Auto-Sync (periodic backend sync)
+        2. Detection Loop (background thread, runs every 30s)
+
+        NOTE: Auto-sync is removed. SyncClient background flush thread
+        is started once at initialize_session_components() and runs
+        independently. No need to start it again here.
         """
         if self.detection_running:
             print("⚠️ Detection already running")
@@ -663,26 +701,19 @@ class SentinelApp:
         self.detection_task.start()
         print("  ✓ Detection loop started (analyzing every 30s)")
         
-        # 3. Start auto-sync
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(self.sync_client.start_auto_sync())
-            loop.close()
-            print("  ✓ Auto-sync started (syncing every 60s)")
-        except Exception as e:
-            print(f"  ⚠️ Auto-sync failed to start: {e}")
-        
         print("✅ Detection pipeline fully active!")
     
     def stop_detection(self):
         """
         🛑 STOP DETECTION PIPELINE
-        
+
         Called when:
         - Taking a break
         - Taking lunch
         - Ending session
+
+        NOTE: Does NOT stop SyncClient background flush.
+        That continues independently until end_integrated_session().
         """
         if not self.detection_running:
             return
@@ -695,22 +726,19 @@ class SentinelApp:
         # Stop input collector
         self.input_collector.stop_collecting()
         
-        # Stop auto-sync
-        self.sync_client.stop_auto_sync()
-        
         print("  ✓ Detection stopped")
     
     def _detection_loop(self):
         """
         🔄 BACKGROUND DETECTION LOOP
-        
+
         Runs every 30 seconds:
         1. Get input patterns from collector
         2. Get activity summary
         3. Run all detection algorithms
-        4. Save abnormalities locally
-        5. Sync to backend
-        
+        4. Save abnormalities locally via aggregator
+        5. Aggregator delegates backend sync to SyncClient
+
         This is the HEART of the detection system.
         """
         print("🔄 Detection loop running...")
@@ -782,7 +810,7 @@ class SentinelApp:
     def on_pattern_detected(self, pattern):
         """
         🎯 AGGREGATED: Handle detected input patterns
-        
+
         Called by InputCollector when patterns are detected:
         - large_paste
         - rapid_paste
@@ -812,7 +840,8 @@ class SentinelApp:
         # Only process if it maps to a known type AND meets confidence threshold
         if abnormality_type and confidence >= self.abnormality_detector.confidence_threshold:
             
-            # 🎯 NEW: Use aggregator to add detection (creates OR updates entry)
+            # Use aggregator to add detection (creates OR updates entry)
+            # Aggregator handles: SQLite save + delegates backend sync to SyncClient
             if self.abnormality_aggregator:
                 self.abnormality_aggregator.add_detection(
                     abnormality_type=abnormality_type,
@@ -833,7 +862,7 @@ class SentinelApp:
     def on_abnormality_detected(self, abnormality: Abnormality):
         """
         Handle detected abnormalities (from AbnormalityDetector)
-        
+
         Abnormalities include:
         - mechanical_typing
         - paste_heavy_work
@@ -862,7 +891,7 @@ class SentinelApp:
     # ============================================
     
     def show_session_conflict_dialog(self, existing_session: dict):
-        """Show dialog when active session exists"""
+        """Show dialog when active session exists on backend"""
         dialog = ctk.CTkToplevel(self.main_window)
         dialog.title("Active Session Found")
         dialog.geometry("500x300")
@@ -991,6 +1020,10 @@ class SentinelApp:
         
         # Stop detection if running
         self.stop_detection()
+        
+        # Stop background flush thread cleanly
+        if self.sync_client:
+            self.sync_client.stop_background_flush()
         
         # Clear saved tokens
         self.jwt_handler.clear_tokens()

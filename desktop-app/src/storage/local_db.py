@@ -200,6 +200,31 @@ class LocalDB:
         
         return dict(row) if row else None
     
+    def get_session_by_backend_id(self, backend_session_id: str) -> Optional[Dict]:
+        """
+        Get local session record by its backend (Supabase) session UUID.
+
+        Used by SyncClient.report_abnormality() to resolve the correct
+        local session ID for SQLite storage when the aggregator passes
+        a backend UUID instead of a local UUID.
+
+        Args:
+            backend_session_id: The UUID assigned by the Supabase backend
+
+        Returns:
+            Session dict if found, None otherwise
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT * FROM sessions WHERE backend_session_id = ? LIMIT 1",
+            (backend_session_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+
+        return dict(row) if row else None
     def get_active_session(self, employee_id: str) -> Optional[Dict]:
         """Get active session for employee"""
         conn = self._get_connection()
