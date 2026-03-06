@@ -1,118 +1,123 @@
 """
-Local Database - SQLite Storage - COMPLETE VERSION WITH AGGREGATION SUPPORT
+Local Database — SQLite Storage
+ONE ROW PER SESSION for abnormalities (mirrors Supabase schema)
 
-Stores session data locally for offline capability.
+Abnormality storage contract:
+  - upsert_session_abnormality() is the ONLY write method for abnormalities.
+  - It does INSERT OR REPLACE based on session_id (UNIQUE constraint).
+  - The full detections dict, overall_severity, and confidence are stored.
+  - get_session_abnormality(session_id) returns the single row (or None).
+  - get_unsynced_abnormalities() returns rows where synced=0.
+  - mark_abnormality_synced(session_id) flips synced=1 after backend push.
+
+This mirrors the Supabase design exactly so the SyncClient can do a
+simple 1:1 push — one local row becomes one backend UPSERT call.
 """
 import sqlite3
+import json
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict
-import json
+import uuid
 
 
 class LocalDB:
     """
-    Local SQLite database for offline storage
-    
+    Local SQLite database for offline storage.
+
     Tables:
-    - sessions: Work sessions
-    - work_logs: Detailed work/break logs
-    - abnormalities: Detected abnormalities
-    - sync_queue: Pending sync operations
+      sessions         — work sessions
+      work_logs        — work/break/lunch log entries
+      abnormalities    — ONE ROW PER SESSION (upserted, not appended)
+      sync_queue       — legacy compatibility (kept but unused by abnormalities)
     """
-    
+
     def __init__(self, db_path: Path):
-        """
-        Initialize local database
-        
-        Args:
-            db_path: Path to SQLite database file
-        """
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Initialize database
         self._init_db()
-    
+
+    # ─── Connection ───────────────────────────────────────────
+
     def _get_connection(self) -> sqlite3.Connection:
-        """Get database connection"""
         conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row  # Return rows as dicts
+        conn.row_factory = sqlite3.Row
         return conn
-    
+
+    # ─── Schema ───────────────────────────────────────────────
+
     def _init_db(self):
-        """Create database tables"""
         conn = self._get_connection()
         cursor = conn.cursor()
-        
-        # Sessions table
+
+        # Sessions
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
-                id TEXT PRIMARY KEY,
-                employee_id TEXT NOT NULL,
-                start_time TEXT NOT NULL,
-                end_time TEXT,
-                total_work_minutes INTEGER DEFAULT 0,
-                total_break_minutes INTEGER DEFAULT 0,
-                lunch_taken BOOLEAN DEFAULT 0,
-                status TEXT DEFAULT 'active',
+                id                   TEXT PRIMARY KEY,
+                employee_id          TEXT NOT NULL,
+                start_time           TEXT NOT NULL,
+                end_time             TEXT,
+                total_work_minutes   INTEGER DEFAULT 0,
+                total_break_minutes  INTEGER DEFAULT 0,
+                lunch_taken          BOOLEAN DEFAULT 0,
+                status               TEXT DEFAULT 'active',
                 session_quality_score REAL,
-                risk_score REAL DEFAULT 0,
-                backend_session_id TEXT,
-                synced BOOLEAN DEFAULT 0,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                risk_score           REAL DEFAULT 0,
+                backend_session_id   TEXT,
+                synced               BOOLEAN DEFAULT 0,
+                created_at           TEXT DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
-        # Work logs table
+
+        # Work logs
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS work_logs (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                log_type TEXT NOT NULL,
-                start_time TEXT NOT NULL,
-                end_time TEXT,
-                duration_minutes INTEGER,
-                break_token_used BOOLEAN DEFAULT 0,
-                synced BOOLEAN DEFAULT 0,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                id                TEXT PRIMARY KEY,
+                session_id        TEXT NOT NULL,
+                log_type          TEXT NOT NULL,
+                start_time        TEXT NOT NULL,
+                end_time          TEXT,
+                duration_minutes  INTEGER,
+                break_token_used  BOOLEAN DEFAULT 0,
+                synced            BOOLEAN DEFAULT 0,
+                created_at        TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             )
         """)
-        
-        # Abnormalities table
+
+        # ── NEW: one row per session ──────────────────────────
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS abnormalities (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                abnormality_type TEXT NOT NULL,
-                confidence_score REAL NOT NULL,
-                detected_at TEXT NOT NULL,
-                metadata TEXT,
-                synced BOOLEAN DEFAULT 0,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (session_id) REFERENCES sessions(id)
+                id                TEXT PRIMARY KEY,
+                session_id        TEXT NOT NULL UNIQUE,
+                overall_severity  TEXT NOT NULL DEFAULT 'LOW',
+                confidence_score  REAL NOT NULL DEFAULT 0,
+                detections        TEXT NOT NULL DEFAULT '{}',
+                first_detected_at TEXT NOT NULL,
+                last_updated_at   TEXT NOT NULL,
+                synced            INTEGER DEFAULT 0
             )
         """)
-        
-        # Sync queue table
+
+        # Sync queue (kept for sessions / work_logs)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sync_queue (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
                 operation_type TEXT NOT NULL,
-                table_name TEXT NOT NULL,
-                record_id TEXT NOT NULL,
-                payload TEXT NOT NULL,
-                attempts INTEGER DEFAULT 0,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                table_name     TEXT NOT NULL,
+                record_id      TEXT NOT NULL,
+                payload        TEXT NOT NULL,
+                created_at     TEXT DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         conn.commit()
         conn.close()
-    
-    # ============ SESSIONS ============
-    
+
+    # ─────────────────────────────────────────────────────────
+    # SESSIONS
+    # ─────────────────────────────────────────────────────────
+
     def create_session(
         self,
         session_id: str,
@@ -120,27 +125,25 @@ class LocalDB:
         start_time: datetime,
         backend_session_id: Optional[str] = None
     ) -> str:
-        """Create new session"""
         conn = self._get_connection()
         cursor = conn.cursor()
-        
         cursor.execute("""
-            INSERT INTO sessions (
-                id, employee_id, start_time, backend_session_id, synced
-            ) VALUES (?, ?, ?, ?, ?)
-        """, (
-            session_id,
-            employee_id,
-            start_time.isoformat(),
-            backend_session_id,
-            1 if backend_session_id else 0
-        ))
-        
+            INSERT OR IGNORE INTO sessions (
+                id, employee_id, start_time, backend_session_id
+            ) VALUES (?, ?, ?, ?)
+        """, (session_id, employee_id, start_time.isoformat(), backend_session_id))
         conn.commit()
         conn.close()
-        
         return session_id
-    
+
+    def get_session(self, session_id: str) -> Optional[Dict]:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
     def update_session(
         self,
         session_id: str,
@@ -149,115 +152,47 @@ class LocalDB:
         total_break_minutes: Optional[int] = None,
         lunch_taken: Optional[bool] = None,
         status: Optional[str] = None,
-        risk_score: Optional[float] = None
+        session_quality_score: Optional[float] = None,
+        risk_score: Optional[float] = None,
+        backend_session_id: Optional[str] = None,
+        synced: Optional[bool] = None
     ):
-        """Update session"""
         conn = self._get_connection()
         cursor = conn.cursor()
-        
-        updates = []
-        values = []
-        
-        if end_time is not None:
-            updates.append("end_time = ?")
-            values.append(end_time.isoformat())
-        if total_work_minutes is not None:
-            updates.append("total_work_minutes = ?")
-            values.append(total_work_minutes)
-        if total_break_minutes is not None:
-            updates.append("total_break_minutes = ?")
-            values.append(total_break_minutes)
-        if lunch_taken is not None:
-            updates.append("lunch_taken = ?")
-            values.append(1 if lunch_taken else 0)
-        if status is not None:
-            updates.append("status = ?")
-            values.append(status)
-        if risk_score is not None:
-            updates.append("risk_score = ?")
-            values.append(risk_score)
-        
+
+        updates, values = [], []
+
+        if end_time             is not None: updates.append("end_time = ?");              values.append(end_time.isoformat())
+        if total_work_minutes   is not None: updates.append("total_work_minutes = ?");    values.append(total_work_minutes)
+        if total_break_minutes  is not None: updates.append("total_break_minutes = ?");   values.append(total_break_minutes)
+        if lunch_taken          is not None: updates.append("lunch_taken = ?");           values.append(1 if lunch_taken else 0)
+        if status               is not None: updates.append("status = ?");                values.append(status)
+        if session_quality_score is not None: updates.append("session_quality_score = ?"); values.append(session_quality_score)
+        if risk_score           is not None: updates.append("risk_score = ?");            values.append(risk_score)
+        if backend_session_id   is not None: updates.append("backend_session_id = ?");    values.append(backend_session_id)
+        if synced               is not None: updates.append("synced = ?");                values.append(1 if synced else 0)
+
         if updates:
             values.append(session_id)
-            cursor.execute(f"""
-                UPDATE sessions 
-                SET {', '.join(updates)}, synced = 0
-                WHERE id = ?
-            """, values)
-            
+            cursor.execute(f"UPDATE sessions SET {', '.join(updates)} WHERE id = ?", values)
             conn.commit()
-        
-        conn.close()
-    
-    def get_session(self, session_id: str) -> Optional[Dict]:
-        """Get session by ID"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
-        row = cursor.fetchone()
-        conn.close()
-        
-        return dict(row) if row else None
-    
-    def get_session_by_backend_id(self, backend_session_id: str) -> Optional[Dict]:
-        """
-        Get local session record by its backend (Supabase) session UUID.
 
-        Used by SyncClient.report_abnormality() to resolve the correct
-        local session ID for SQLite storage when the aggregator passes
-        a backend UUID instead of a local UUID.
-
-        Args:
-            backend_session_id: The UUID assigned by the Supabase backend
-
-        Returns:
-            Session dict if found, None otherwise
-        """
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute(
-            "SELECT * FROM sessions WHERE backend_session_id = ? LIMIT 1",
-            (backend_session_id,)
-        )
-        row = cursor.fetchone()
         conn.close()
 
-        return dict(row) if row else None
-    def get_active_session(self, employee_id: str) -> Optional[Dict]:
-        """Get active session for employee"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT * FROM sessions 
-            WHERE employee_id = ? AND status = 'active'
-            ORDER BY start_time DESC
-            LIMIT 1
-        """, (employee_id,))
-        
-        row = cursor.fetchone()
-        conn.close()
-        
-        return dict(row) if row else None
-    
     def get_unsynced_sessions(self) -> List[Dict]:
-        """Get sessions that need syncing"""
         conn = self._get_connection()
         cursor = conn.cursor()
-        
-        cursor.execute("SELECT * FROM sessions WHERE synced = 0")
+        cursor.execute("SELECT * FROM sessions WHERE synced = 0 AND backend_session_id IS NULL")
         rows = cursor.fetchall()
         conn.close()
-        
-        return [dict(row) for row in rows]
-    
-    # ============ WORK LOGS ============
-    
+        return [dict(r) for r in rows]
+
+    # ─────────────────────────────────────────────────────────
+    # WORK LOGS
+    # ─────────────────────────────────────────────────────────
+
     def create_work_log(
         self,
-        log_id: str,
         session_id: str,
         log_type: str,
         start_time: datetime,
@@ -265,289 +200,186 @@ class LocalDB:
         duration_minutes: Optional[int] = None,
         break_token_used: bool = False
     ) -> str:
-        """Create work log entry"""
+        log_id = str(uuid.uuid4())
         conn = self._get_connection()
         cursor = conn.cursor()
-        
         cursor.execute("""
             INSERT INTO work_logs (
-                id, session_id, log_type, start_time, end_time, 
+                id, session_id, log_type, start_time, end_time,
                 duration_minutes, break_token_used
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
-            log_id,
-            session_id,
-            log_type,
+            log_id, session_id, log_type,
             start_time.isoformat(),
             end_time.isoformat() if end_time else None,
             duration_minutes,
             1 if break_token_used else 0
         ))
-        
         conn.commit()
         conn.close()
-        
         return log_id
-    
+
     def get_session_logs(self, session_id: str) -> List[Dict]:
-        """Get all logs for a session"""
         conn = self._get_connection()
         cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT * FROM work_logs 
-            WHERE session_id = ?
-            ORDER BY start_time
-        """, (session_id,))
-        
+        cursor.execute(
+            "SELECT * FROM work_logs WHERE session_id = ? ORDER BY start_time",
+            (session_id,)
+        )
         rows = cursor.fetchall()
         conn.close()
-        
-        return [dict(row) for row in rows]
-    
-    # ============ ABNORMALITIES ============
-    
-    def create_abnormality(
+        return [dict(r) for r in rows]
+
+    # ─────────────────────────────────────────────────────────
+    # ABNORMALITIES — one row per session, upserted
+    # ─────────────────────────────────────────────────────────
+
+    def upsert_session_abnormality(
         self,
-        abnormality_id: str,
         session_id: str,
-        abnormality_type: str,
+        overall_severity: str,
         confidence_score: float,
-        detected_at: datetime,
-        metadata: Dict
+        detections: dict,
+        first_detected_at: datetime,
+        last_updated_at: datetime
     ) -> str:
-        """Create abnormality record"""
+        """
+        INSERT or REPLACE the abnormality record for this session.
+
+        Called by AbnormalityAggregator every time add_detection() runs.
+        The full in-memory state is written — no partial updates.
+
+        Returns the record id (stable UUID for this session).
+        """
         conn = self._get_connection()
         cursor = conn.cursor()
-        
+
+        # Derive a stable id from session_id so it never changes across upserts
+        record_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"abnormality:{session_id}"))
+
         cursor.execute("""
             INSERT INTO abnormalities (
-                id, session_id, abnormality_type, confidence_score,
-                detected_at, metadata
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                id, session_id, overall_severity, confidence_score,
+                detections, first_detected_at, last_updated_at, synced
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(session_id) DO UPDATE SET
+                overall_severity  = excluded.overall_severity,
+                confidence_score  = excluded.confidence_score,
+                detections        = excluded.detections,
+                last_updated_at   = excluded.last_updated_at,
+                synced            = 0
         """, (
-            abnormality_id,
+            record_id,
             session_id,
-            abnormality_type,
+            overall_severity,
             confidence_score,
-            detected_at.isoformat(),
-            json.dumps(metadata)
+            json.dumps(detections),
+            first_detected_at.isoformat(),
+            last_updated_at.isoformat()
         ))
-        
+
         conn.commit()
         conn.close()
-        
-        return abnormality_id
-    
-    def update_abnormality(
-        self,
-        abnormality_id: str,
-        confidence_score: Optional[float] = None,
-        metadata: Optional[Dict] = None
-    ):
-        """
-        🎯 NEW: Update existing abnormality (for aggregation)
-        
-        This method is REQUIRED for session-level aggregation to work.
-        It updates an existing abnormality entry instead of creating a new one.
-        """
+        return record_id
+
+    def get_session_abnormality(self, session_id: str) -> Optional[Dict]:
+        """Get the single abnormality record for a session (or None)."""
         conn = self._get_connection()
         cursor = conn.cursor()
-        
-        updates = []
-        values = []
-        
-        if confidence_score is not None:
-            updates.append("confidence_score = ?")
-            values.append(confidence_score)
-        
-        if metadata is not None:
-            updates.append("metadata = ?")
-            values.append(json.dumps(metadata))
-        
-        if updates:
-            # Mark as unsynced after update
-            updates.append("synced = 0")
-            values.append(abnormality_id)
-            
-            cursor.execute(f"""
-                UPDATE abnormalities 
-                SET {', '.join(updates)}
-                WHERE id = ?
-            """, values)
-            
-            conn.commit()
-        
+        cursor.execute(
+            "SELECT * FROM abnormalities WHERE session_id = ?", (session_id,)
+        )
+        row = cursor.fetchone()
         conn.close()
-    
-    def get_session_abnormalities(self, session_id: str) -> List[Dict]:
-        """Get abnormalities for a session"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT * FROM abnormalities
-            WHERE session_id = ?
-            ORDER BY detected_at DESC
-        """, (session_id,))
-        
-        rows = cursor.fetchall()
-        conn.close()
-        
-        result = []
-        for row in rows:
-            data = dict(row)
-            # Parse JSON metadata
-            if data.get("metadata"):
-                data["metadata"] = json.loads(data["metadata"])
-            result.append(data)
-        
-        return result
-    
+
+        if not row:
+            return None
+
+        data = dict(row)
+        data["detections"] = json.loads(data["detections"] or "{}")
+        return data
+
     def get_unsynced_abnormalities(self) -> List[Dict]:
-        """Get abnormalities that need syncing"""
+        """Return all abnormality records not yet pushed to backend."""
         conn = self._get_connection()
         cursor = conn.cursor()
-        
         cursor.execute("SELECT * FROM abnormalities WHERE synced = 0")
         rows = cursor.fetchall()
         conn.close()
-        
+
         result = []
         for row in rows:
             data = dict(row)
-            if data.get("metadata"):
-                data["metadata"] = json.loads(data["metadata"])
+            data["detections"] = json.loads(data["detections"] or "{}")
             result.append(data)
-        
         return result
-    
-    def mark_abnormality_synced(self, abnormality_id: str):
-        """Mark abnormality as synced"""
+
+    def mark_abnormality_synced(self, session_id: str):
+        """Mark the abnormality record for this session as synced=1."""
         conn = self._get_connection()
         cursor = conn.cursor()
-        
-        cursor.execute("""
-            UPDATE abnormalities SET synced = 1 WHERE id = ?
-        """, (abnormality_id,))
-        
+        cursor.execute(
+            "UPDATE abnormalities SET synced = 1 WHERE session_id = ?",
+            (session_id,)
+        )
         conn.commit()
         conn.close()
-    
-    # ============ SYNC QUEUE ============
-    
-    def add_to_sync_queue(
-        self,
-        operation_type: str,
-        table_name: str,
-        record_id: str,
-        payload: Dict
-    ):
-        """Add operation to sync queue"""
+
+    # ─── Legacy compatibility shims (used by old sync_client code) ───
+    # These are kept so nothing breaks if old call sites exist.
+    # They delegate to upsert_session_abnormality() where possible.
+
+    def get_session_abnormalities(self, session_id: str) -> List[Dict]:
+        """Legacy: returns list with 0 or 1 item."""
+        record = self.get_session_abnormality(session_id)
+        return [record] if record else []
+
+    def mark_abnormality_synced_by_id(self, record_id: str):
+        """Legacy: mark synced by record id."""
         conn = self._get_connection()
         cursor = conn.cursor()
-        
-        cursor.execute("""
-            INSERT INTO sync_queue (
-                operation_type, table_name, record_id, payload
-            ) VALUES (?, ?, ?, ?)
-        """, (
-            operation_type,
-            table_name,
-            record_id,
-            json.dumps(payload)
-        ))
-        
+        cursor.execute("UPDATE abnormalities SET synced = 1 WHERE id = ?", (record_id,))
         conn.commit()
         conn.close()
-    
+
+    # ─────────────────────────────────────────────────────────
+    # SYNC QUEUE (for sessions / work_logs — not abnormalities)
+    # ─────────────────────────────────────────────────────────
+
+    def add_to_sync_queue(self, operation_type: str, table_name: str,
+                          record_id: str, payload: Dict):
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO sync_queue (operation_type, table_name, record_id, payload)
+            VALUES (?, ?, ?, ?)
+        """, (operation_type, table_name, record_id, json.dumps(payload)))
+        conn.commit()
+        conn.close()
+
     def get_sync_queue(self, limit: int = 100) -> List[Dict]:
-        """Get pending sync operations"""
         conn = self._get_connection()
         cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT * FROM sync_queue
-            ORDER BY created_at
-            LIMIT ?
-        """, (limit,))
-        
+        cursor.execute("SELECT * FROM sync_queue ORDER BY created_at LIMIT ?", (limit,))
         rows = cursor.fetchall()
         conn.close()
-        
         result = []
         for row in rows:
             data = dict(row)
             data["payload"] = json.loads(data["payload"])
             result.append(data)
-        
         return result
-    
+
     def remove_from_sync_queue(self, queue_id: int):
-        """Remove operation from sync queue"""
         conn = self._get_connection()
         cursor = conn.cursor()
-        
         cursor.execute("DELETE FROM sync_queue WHERE id = ?", (queue_id,))
-        
         conn.commit()
         conn.close()
-    
+
     def clear_sync_queue(self):
-        """Clear entire sync queue"""
         conn = self._get_connection()
         cursor = conn.cursor()
-        
         cursor.execute("DELETE FROM sync_queue")
-        
         conn.commit()
         conn.close()
-
-
-# Example usage
-if __name__ == "__main__":
-    from pathlib import Path
-    import uuid
-    
-    db = LocalDB(Path.home() / ".sentinel" / "test.db")
-    
-    # Create session
-    session_id = str(uuid.uuid4())
-    db.create_session(
-        session_id=session_id,
-        employee_id="test-employee",
-        start_time=datetime.now()
-    )
-    
-    print(f"✓ Session created: {session_id}")
-    
-    # Create abnormality
-    abn_id = str(uuid.uuid4())
-    db.create_abnormality(
-        abnormality_id=abn_id,
-        session_id=session_id,
-        abnormality_type="mechanical_typing",
-        confidence_score=0.85,
-        detected_at=datetime.now(),
-        metadata={"description": "Test abnormality"}
-    )
-    
-    print(f"✓ Abnormality created: {abn_id}")
-    
-    # Update abnormality (NEW METHOD)
-    db.update_abnormality(
-        abnormality_id=abn_id,
-        confidence_score=0.90,
-        metadata={"description": "Updated abnormality", "occurrences": 2}
-    )
-    
-    print(f"✓ Abnormality updated: {abn_id}")
-    
-    # Get session
-    session = db.get_session(session_id)
-    print(f"✓ Session retrieved: {session['id']}")
-    
-    # Get abnormalities
-    abnormalities = db.get_session_abnormalities(session_id)
-    print(f"✓ Abnormalities: {len(abnormalities)}")
-    print(f"   First abnormality metadata: {abnormalities[0]['metadata']}")
