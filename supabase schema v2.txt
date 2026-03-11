@@ -1,0 +1,228 @@
+create table public.abnormalities (
+  id uuid not null default extensions.uuid_generate_v4 (),
+  session_id uuid not null,
+  employee_id uuid not null,
+  overall_severity character varying(20) not null default 'LOW'::character varying,
+  confidence_score numeric(5, 2) not null default 0,
+  detections jsonb not null default '{}'::jsonb,
+  first_detected_at timestamp with time zone not null,
+  last_updated_at timestamp with time zone not null,
+  reviewed boolean null default false,
+  reviewed_by uuid null,
+  reviewed_at timestamp with time zone null,
+  review_decision character varying(50) null,
+  created_at timestamp with time zone null default now(),
+  constraint abnormalities_pkey primary key (id),
+  constraint abnormalities_session_id_key unique (session_id),
+  constraint abnormalities_employee_id_fkey foreign KEY (employee_id) references employees (id) on delete CASCADE,
+  constraint abnormalities_reviewed_by_fkey foreign KEY (reviewed_by) references employees (id),
+  constraint abnormalities_session_id_fkey foreign KEY (session_id) references sessions (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create index IF not exists idx_abnormalities_session on public.abnormalities using btree (session_id) TABLESPACE pg_default;
+
+create index IF not exists idx_abnormalities_employee on public.abnormalities using btree (employee_id) TABLESPACE pg_default;
+
+create index IF not exists idx_abnormalities_severity on public.abnormalities using btree (overall_severity) TABLESPACE pg_default;
+
+create index IF not exists idx_abnormalities_reviewed on public.abnormalities using btree (reviewed) TABLESPACE pg_default;
+
+create index IF not exists idx_abnormalities_updated on public.abnormalities using btree (last_updated_at) TABLESPACE pg_default;
+
+
+
+create table public.admin_actions (
+  id uuid not null default extensions.uuid_generate_v4 (),
+  admin_id uuid not null,
+  employee_id uuid not null,
+  session_id uuid null,
+  action_type character varying(100) not null,
+  justification text not null,
+  metadata jsonb null,
+  created_at timestamp without time zone null default CURRENT_TIMESTAMP,
+  constraint admin_actions_pkey primary key (id),
+  constraint admin_actions_admin_id_fkey foreign KEY (admin_id) references employees (id),
+  constraint admin_actions_employee_id_fkey foreign KEY (employee_id) references employees (id),
+  constraint admin_actions_session_id_fkey foreign KEY (session_id) references sessions (id)
+) TABLESPACE pg_default;
+
+create index IF not exists idx_admin_actions_admin on public.admin_actions using btree (admin_id) TABLESPACE pg_default;
+
+create index IF not exists idx_admin_actions_employee on public.admin_actions using btree (employee_id) TABLESPACE pg_default;
+
+create index IF not exists idx_admin_actions_type on public.admin_actions using btree (action_type) TABLESPACE pg_default;create table public.appeals (
+  id uuid not null default extensions.uuid_generate_v4 (),
+  employee_id uuid not null,
+  session_id uuid not null,
+  abnormality_id uuid null,
+  reason text not null,
+  status character varying(50) null default 'pending'::character varying,
+  reviewed_by uuid null,
+  reviewed_at timestamp with time zone null,
+  admin_response text null,
+  created_at timestamp with time zone null default now(),
+  constraint appeals_pkey primary key (id),
+  constraint appeals_abnormality_id_fkey foreign KEY (abnormality_id) references abnormalities (id),
+  constraint appeals_employee_id_fkey foreign KEY (employee_id) references employees (id) on delete CASCADE,
+  constraint appeals_reviewed_by_fkey foreign KEY (reviewed_by) references employees (id),
+  constraint appeals_session_id_fkey foreign KEY (session_id) references sessions (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create index IF not exists idx_appeals_employee on public.appeals using btree (employee_id) TABLESPACE pg_default;
+
+create index IF not exists idx_appeals_status on public.appeals using btree (status) TABLESPACE pg_default;
+create table public.audit_log (
+  id uuid not null default extensions.uuid_generate_v4 (),
+  event_type character varying(100) not null,
+  actor_id uuid null,
+  target_id uuid null,
+  target_type character varying(50) null,
+  action character varying(100) not null,
+  metadata jsonb null,
+  ip_address inet null,
+  user_agent text null,
+  created_at timestamp without time zone null default CURRENT_TIMESTAMP,
+  constraint audit_log_pkey primary key (id),
+  constraint audit_log_actor_id_fkey foreign KEY (actor_id) references employees (id)
+) TABLESPACE pg_default;
+
+create index IF not exists idx_audit_event_type on public.audit_log using btree (event_type) TABLESPACE pg_default;
+
+create index IF not exists idx_audit_actor on public.audit_log using btree (actor_id) TABLESPACE pg_default;
+
+create index IF not exists idx_audit_created on public.audit_log using btree (created_at) TABLESPACE pg_default;
+create table public.employees (
+  id uuid not null default extensions.uuid_generate_v4 (),
+  email character varying(255) not null,
+  password_hash character varying(255) not null,
+  full_name character varying(255) not null,
+  role character varying(50) not null default 'employee'::character varying,
+  department character varying(100) null,
+  is_active boolean null default true,
+  created_at timestamp without time zone null default CURRENT_TIMESTAMP,
+  updated_at timestamp without time zone null default CURRENT_TIMESTAMP,
+  constraint employees_pkey primary key (id),
+  constraint employees_email_key unique (email)
+) TABLESPACE pg_default;
+
+create trigger update_employees_updated_at BEFORE
+update on employees for EACH row
+execute FUNCTION update_updated_at_column ();
+create table public.notification_preferences (
+  id uuid not null default extensions.uuid_generate_v4 (),
+  employee_id uuid not null,
+  email_notifications boolean null default true,
+  break_reminders boolean null default true,
+  weekly_reports boolean null default false,
+  abnormality_alerts boolean null default true,
+  created_at timestamp without time zone null default CURRENT_TIMESTAMP,
+  updated_at timestamp without time zone null default CURRENT_TIMESTAMP,
+  constraint notification_preferences_pkey primary key (id),
+  constraint notification_preferences_employee_id_fkey foreign KEY (employee_id) references employees (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create trigger update_notification_prefs_updated_at BEFORE
+update on notification_preferences for EACH row
+execute FUNCTION update_updated_at_column ();
+create table public.productivity_metrics (
+  id uuid not null default extensions.uuid_generate_v4 (),
+  session_id uuid not null,
+  employee_id uuid not null,
+  hour_of_day integer null,
+  activity_intensity numeric(5, 2) null,
+  break_effectiveness_score numeric(5, 2) null,
+  keystroke_count integer null,
+  mouse_movement_count integer null,
+  paste_count integer null,
+  recorded_at timestamp without time zone not null,
+  created_at timestamp without time zone null default CURRENT_TIMESTAMP,
+  constraint productivity_metrics_pkey primary key (id),
+  constraint productivity_metrics_employee_id_fkey foreign KEY (employee_id) references employees (id) on delete CASCADE,
+  constraint productivity_metrics_session_id_fkey foreign KEY (session_id) references sessions (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create index IF not exists idx_metrics_employee on public.productivity_metrics using btree (employee_id) TABLESPACE pg_default;
+
+create index IF not exists idx_metrics_session on public.productivity_metrics using btree (session_id) TABLESPACE pg_default;
+
+create table public.reports (
+  id uuid not null default extensions.uuid_generate_v4 (),
+  report_type character varying(100) not null,
+  generated_by uuid not null,
+  start_date date not null,
+  end_date date not null,
+  filters jsonb null,
+  file_path character varying(500) null,
+  file_format character varying(20) null,
+  generated_at timestamp without time zone null default CURRENT_TIMESTAMP,
+  constraint reports_pkey primary key (id),
+  constraint reports_generated_by_fkey foreign KEY (generated_by) references employees (id)
+) TABLESPACE pg_default;
+
+create index IF not exists idx_reports_type on public.reports using btree (report_type) TABLESPACE pg_default;
+
+create index IF not exists idx_reports_dates on public.reports using btree (start_date, end_date) TABLESPACE pg_default;
+
+create table public.sessions (
+  id uuid not null default extensions.uuid_generate_v4 (),
+  employee_id uuid not null,
+  start_time timestamp without time zone not null,
+  end_time timestamp without time zone null,
+  total_work_minutes integer null default 0,
+  total_break_minutes integer null default 0,
+  lunch_taken boolean null default false,
+  status character varying(50) null default 'active'::character varying,
+  session_quality_score numeric(5, 2) null,
+  risk_score numeric(5, 2) null default 0,
+  created_at timestamp without time zone null default CURRENT_TIMESTAMP,
+  updated_at timestamp without time zone null default CURRENT_TIMESTAMP,
+  constraint sessions_pkey primary key (id),
+  constraint sessions_employee_id_fkey foreign KEY (employee_id) references employees (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create index IF not exists idx_sessions_employee on public.sessions using btree (employee_id) TABLESPACE pg_default;
+
+create index IF not exists idx_sessions_start_time on public.sessions using btree (start_time) TABLESPACE pg_default;
+
+create index IF not exists idx_sessions_status on public.sessions using btree (status) TABLESPACE pg_default;
+
+create trigger update_sessions_updated_at BEFORE
+update on sessions for EACH row
+execute FUNCTION update_updated_at_column ();
+
+create table public.work_rules (
+  id uuid not null default extensions.uuid_generate_v4 (),
+  department character varying(100) null,
+  employee_id uuid null,
+  work_minutes_per_hour integer null default 50,
+  break_minutes_per_hour integer null default 10,
+  lunch_duration_minutes integer null default 30,
+  daily_work_target_minutes integer null default 400,
+  detection_sensitivity character varying(20) null default 'medium'::character varying,
+  created_at timestamp without time zone null default CURRENT_TIMESTAMP,
+  updated_at timestamp without time zone null default CURRENT_TIMESTAMP,
+  constraint work_rules_pkey primary key (id),
+  constraint work_rules_employee_id_fkey foreign KEY (employee_id) references employees (id)
+) TABLESPACE pg_default;
+
+create trigger update_work_rules_updated_at BEFORE
+update on work_rules for EACH row
+execute FUNCTION update_updated_at_column ();
+
+create table public.work_time_logs (
+  id uuid not null default extensions.uuid_generate_v4 (),
+  session_id uuid not null,
+  log_type character varying(50) not null,
+  start_time timestamp without time zone not null,
+  end_time timestamp without time zone null,
+  duration_minutes integer null,
+  break_token_used boolean null default false,
+  created_at timestamp without time zone null default CURRENT_TIMESTAMP,
+  constraint work_time_logs_pkey primary key (id),
+  constraint work_time_logs_session_id_fkey foreign KEY (session_id) references sessions (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create index IF not exists idx_work_logs_session on public.work_time_logs using btree (session_id) TABLESPACE pg_default;
+
+create index IF not exists idx_work_logs_type on public.work_time_logs using btree (log_type) TABLESPACE pg_default;
+
