@@ -22,7 +22,6 @@ import threading
 import time
 from datetime import datetime
 from typing import Optional, Callable, Dict, List
-from pathlib import Path
 
 from storage.local_db import LocalDB
 
@@ -53,18 +52,20 @@ class SyncClient:
         self.on_sync_error         = on_sync_error
         self.sync_interval_seconds = sync_interval_seconds
 
-        self.is_syncing: bool               = False
+        self.is_syncing: bool                   = False
         self.last_sync_time: Optional[datetime] = None
-        self.sync_errors: List[str]         = []
-        self.backend_online: bool           = True
+        self.sync_errors: List[str]             = []
+        self.backend_online: bool               = True
 
         self._flush_thread: Optional[threading.Thread] = None
-        self._flush_running: bool           = False
+        self._flush_running: bool               = False
 
         # Legacy compat
         self.sync_task = None
 
-    # ─── Helpers ──────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────
+    # HELPERS
+    # ─────────────────────────────────────────────────────────
 
     def _get_headers(self) -> Dict[str, str]:
         return {
@@ -118,21 +119,20 @@ class SyncClient:
     def _run_flush_cycle(self):
         """
         One complete flush cycle.
-        - Unsynced sessions are pushed first (abnormalities need backend_session_id).
-        - Each unsynced abnormality record (one per session) gets one HTTP UPSERT call.
+        Sessions are pushed first (abnormalities need backend_session_id).
+        Each unsynced abnormality record (one per session) gets one HTTP UPSERT.
         """
         unsynced_sessions      = self.local_db.get_unsynced_sessions()
         unsynced_abnormalities = self.local_db.get_unsynced_abnormalities()
 
         if not unsynced_sessions and not unsynced_abnormalities:
-            return  # Nothing to do
+            return
 
         total = len(unsynced_sessions) + len(unsynced_abnormalities)
         print(f"\n🔄 Flush cycle: {total} record(s) to sync "
               f"({len(unsynced_sessions)} sessions, "
               f"{len(unsynced_abnormalities)} abnormality records)")
 
-        # Fresh event loop for this thread
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         synced_count = 0
@@ -158,7 +158,6 @@ class SyncClient:
                 try:
                     local_session = self.local_db.get_session(abn["session_id"])
                     if not local_session or not local_session.get("backend_session_id"):
-                        # Session not yet synced to backend — skip this cycle
                         failed_count += 1
                         continue
 
@@ -166,12 +165,12 @@ class SyncClient:
 
                     success = loop.run_until_complete(
                         self._push_abnormality_to_backend(
-                            backend_session_id = backend_session_id,
-                            detections         = abn["detections"],
-                            overall_severity   = abn["overall_severity"],
-                            confidence_score   = abn["confidence_score"],
-                            first_detected_at  = abn["first_detected_at"],
-                            last_updated_at    = abn["last_updated_at"],
+                            backend_session_id=backend_session_id,
+                            detections=abn["detections"],
+                            overall_severity=abn["overall_severity"],
+                            confidence_score=abn["confidence_score"],
+                            first_detected_at=abn["first_detected_at"],
+                            last_updated_at=abn["last_updated_at"],
                         )
                     )
 
@@ -193,7 +192,7 @@ class SyncClient:
 
             if self.on_sync_complete and synced_count > 0:
                 self.on_sync_complete({
-                    "sessions_synced":      len([s for s in unsynced_sessions]),
+                    "sessions_synced":      len(unsynced_sessions),
                     "abnormalities_synced": synced_count,
                     "errors": []
                 })
@@ -216,14 +215,8 @@ class SyncClient:
     ) -> bool:
         """
         Push ONE abnormality record to the backend.
-
-        The backend route is a UPSERT — it finds the existing row for this
-        session_id and merges, or creates a fresh one. We send the FULL
-        current state (not a delta) so the backend always ends up consistent.
-
-        We iterate over each detection type and call POST /abnormalities/ once
-        per type (the backend merges them). Alternatively, if you add a bulk
-        endpoint later, this is the place to change.
+        The backend route is a UPSERT — finds existing row for session_id,
+        merges, or creates fresh. We send FULL current state.
         """
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
@@ -302,6 +295,53 @@ class SyncClient:
             self._mark_backend_offline(str(e))
             return False
 
+    async def _delete_session_from_backend(self, backend_session_id: str) -> bool:
+        """
+        DELETE a session from Supabase via the backend API.
+        Supabase CASCADE wipes abnormalities + work_logs automatically.
+        Used when user chooses 'End & Start New' on conflict.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.delete(
+                    f"{self.api_base_url}/api/v1/sessions/{backend_session_id}",
+                    headers=self._get_headers()
+                )
+                if response.status_code in (200, 404):
+                    # 404 is fine — already gone
+                    print(f"  🗑️ Deleted backend session {backend_session_id[:8]}...")
+                    self._mark_backend_online()
+                    return True
+                else:
+                    print(f"  ⚠️ Failed to delete backend session: HTTP {response.status_code}")
+                    return False
+
+        except httpx.ConnectError:
+            self._mark_backend_offline("connection refused")
+            return False
+        except httpx.TimeoutException:
+            self._mark_backend_offline("timeout")
+            return False
+        except Exception as e:
+            print(f"  ⚠️ Error deleting backend session: {e}")
+            return False
+
+    def delete_session_now(self, backend_session_id: str) -> bool:
+        """
+        Synchronous wrapper for _delete_session_from_backend.
+        Call from main thread (e.g. end_and_start_new in main.py).
+        """
+        try:
+            loop = asyncio.new_event_loop()
+            result = loop.run_until_complete(
+                self._delete_session_from_backend(backend_session_id)
+            )
+            loop.close()
+            return result
+        except Exception as e:
+            print(f"  ⚠️ delete_session_now error: {e}")
+            return False
+
     # ─────────────────────────────────────────────────────────
     # FORCED SYNC (called at session end by main.py)
     # ─────────────────────────────────────────────────────────
@@ -319,9 +359,7 @@ class SyncClient:
             print(f"  ⚠️ Final sync error: {e}")
 
     async def sync_all(self):
-        """
-        Async version of sync_now (legacy compat — called from async contexts).
-        """
+        """Async version of sync_now (legacy compat)."""
         unsynced_sessions      = self.local_db.get_unsynced_sessions()
         unsynced_abnormalities = self.local_db.get_unsynced_abnormalities()
 
@@ -334,12 +372,12 @@ class SyncClient:
                 continue
 
             success = await self._push_abnormality_to_backend(
-                backend_session_id = local_session["backend_session_id"],
-                detections         = abn["detections"],
-                overall_severity   = abn["overall_severity"],
-                confidence_score   = abn["confidence_score"],
-                first_detected_at  = abn["first_detected_at"],
-                last_updated_at    = abn["last_updated_at"],
+                backend_session_id=local_session["backend_session_id"],
+                detections=abn["detections"],
+                overall_severity=abn["overall_severity"],
+                confidence_score=abn["confidence_score"],
+                first_detected_at=abn["first_detected_at"],
+                last_updated_at=abn["last_updated_at"],
             )
             if success:
                 self.local_db.mark_abnormality_synced(abn["session_id"])
@@ -353,10 +391,8 @@ class SyncClient:
     async def report_abnormality(self, *args, **kwargs) -> bool:
         """
         NO-OP — kept for interface compatibility only.
-
         Abnormalities are written to SQLite by AbnormalityAggregator.
         Background flush pushes them to Supabase on its interval.
-        Do NOT call this method for new code.
         """
         return True
 

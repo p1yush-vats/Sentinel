@@ -37,14 +37,18 @@ class LocalDB:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
-    # ─── Connection ───────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────
+    # CONNECTION
+    # ─────────────────────────────────────────────────────────
 
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         return conn
 
-    # ─── Schema ───────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────
+    # SCHEMA
+    # ─────────────────────────────────────────────────────────
 
     def _init_db(self):
         conn = self._get_connection()
@@ -85,7 +89,7 @@ class LocalDB:
             )
         """)
 
-        # ── NEW: one row per session ──────────────────────────
+        # Abnormalities — one row per session
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS abnormalities (
                 id                TEXT PRIMARY KEY,
@@ -99,7 +103,7 @@ class LocalDB:
             )
         """)
 
-        # Sync queue (kept for sessions / work_logs)
+        # Sync queue (for sessions / work_logs)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sync_queue (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -137,6 +141,7 @@ class LocalDB:
         return session_id
 
     def get_session(self, session_id: str) -> Optional[Dict]:
+        """Get session by local UUID."""
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
@@ -144,6 +149,44 @@ class LocalDB:
         conn.close()
         return dict(row) if row else None
 
+    def get_active_session(self, employee_id: str) -> Optional[Dict]:
+        """Get the active session for an employee (or None)."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM sessions
+            WHERE employee_id = ? AND status = 'active'
+            ORDER BY start_time DESC
+            LIMIT 1
+        """, (employee_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def get_session_by_backend_id(self, backend_session_id: str) -> Optional[Dict]:
+        """Get a local session record by its backend UUID."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM sessions WHERE backend_session_id = ?",
+            (backend_session_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def delete_session(self, session_id: str):
+        """Delete a session and its associated abnormality record from local DB."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        # Abnormalities have a FK on session_id but no CASCADE in SQLite DDL,
+        # so delete child records first.
+        cursor.execute("DELETE FROM abnormalities WHERE session_id = ?", (session_id,))
+        cursor.execute("DELETE FROM work_logs WHERE session_id = ?", (session_id,))
+        cursor.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        conn.commit()
+        conn.close()
+        print(f"  🗑️ Deleted local session {session_id[:8]}... and related records")
     def update_session(
         self,
         session_id: str,
@@ -162,15 +205,15 @@ class LocalDB:
 
         updates, values = [], []
 
-        if end_time             is not None: updates.append("end_time = ?");              values.append(end_time.isoformat())
-        if total_work_minutes   is not None: updates.append("total_work_minutes = ?");    values.append(total_work_minutes)
-        if total_break_minutes  is not None: updates.append("total_break_minutes = ?");   values.append(total_break_minutes)
-        if lunch_taken          is not None: updates.append("lunch_taken = ?");           values.append(1 if lunch_taken else 0)
-        if status               is not None: updates.append("status = ?");                values.append(status)
-        if session_quality_score is not None: updates.append("session_quality_score = ?"); values.append(session_quality_score)
-        if risk_score           is not None: updates.append("risk_score = ?");            values.append(risk_score)
-        if backend_session_id   is not None: updates.append("backend_session_id = ?");    values.append(backend_session_id)
-        if synced               is not None: updates.append("synced = ?");                values.append(1 if synced else 0)
+        if end_time              is not None: updates.append("end_time = ?");               values.append(end_time.isoformat())
+        if total_work_minutes    is not None: updates.append("total_work_minutes = ?");     values.append(total_work_minutes)
+        if total_break_minutes   is not None: updates.append("total_break_minutes = ?");    values.append(total_break_minutes)
+        if lunch_taken           is not None: updates.append("lunch_taken = ?");            values.append(1 if lunch_taken else 0)
+        if status                is not None: updates.append("status = ?");                 values.append(status)
+        if session_quality_score is not None: updates.append("session_quality_score = ?");  values.append(session_quality_score)
+        if risk_score            is not None: updates.append("risk_score = ?");             values.append(risk_score)
+        if backend_session_id    is not None: updates.append("backend_session_id = ?");     values.append(backend_session_id)
+        if synced                is not None: updates.append("synced = ?");                 values.append(1 if synced else 0)
 
         if updates:
             values.append(session_id)
@@ -325,9 +368,8 @@ class LocalDB:
         conn.commit()
         conn.close()
 
-    # ─── Legacy compatibility shims (used by old sync_client code) ───
-    # These are kept so nothing breaks if old call sites exist.
-    # They delegate to upsert_session_abnormality() where possible.
+    # ─── Legacy compatibility shims ──────────────────────────
+    # Kept so nothing breaks if old call sites exist.
 
     def get_session_abnormalities(self, session_id: str) -> List[Dict]:
         """Legacy: returns list with 0 or 1 item."""

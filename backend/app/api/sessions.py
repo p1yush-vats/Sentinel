@@ -1,11 +1,5 @@
 """
-Sessions API Endpoints - FIXED STATUS LOGIC
-Replace backend/api/sessions.py with this file
-
-Key fixes:
-1. Status based on work completion percentage
-2. incomplete (<40%), partial (40-89%), completed (90%+)
-3. active sessions stay active
+Sessions API Endpoints
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,14 +17,15 @@ from ..models.session import Session, WorkTimeLog
 router = APIRouter()
 
 
-# Schemas
+# ─────────────────────────────────────────────────────────
+# SCHEMAS
+# ─────────────────────────────────────────────────────────
+
 class SessionStart(BaseModel):
-    """Session start request"""
     pass
 
 
 class SessionUpdate(BaseModel):
-    """Session update request"""
     total_work_minutes: Optional[int] = None
     total_break_minutes: Optional[int] = None
     lunch_taken: Optional[bool] = None
@@ -38,7 +33,6 @@ class SessionUpdate(BaseModel):
 
 
 class SessionEnd(BaseModel):
-    """Session end request"""
     total_work_minutes: int
     total_break_minutes: int
     lunch_taken: bool
@@ -46,7 +40,6 @@ class SessionEnd(BaseModel):
 
 
 class WorkLogCreate(BaseModel):
-    """Work log creation"""
     log_type: str
     start_time: datetime
     end_time: Optional[datetime] = None
@@ -54,13 +47,14 @@ class WorkLogCreate(BaseModel):
     break_token_used: bool = False
 
 
+# ─────────────────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────────────────
+
 def calculate_session_status(total_work_minutes: int, target_minutes: int = 400) -> str:
-    
     if target_minutes == 0:
         return 'incomplete'
-    
     completion_percentage = (total_work_minutes / target_minutes) * 100
-    
     if completion_percentage >= 90:
         return 'completed'
     elif completion_percentage >= 40:
@@ -69,6 +63,10 @@ def calculate_session_status(total_work_minutes: int, target_minutes: int = 400)
         return 'incomplete'
 
 
+# ─────────────────────────────────────────────────────────
+# ENDPOINTS
+# ─────────────────────────────────────────────────────────
+
 @router.post("/start")
 async def start_session(
     force_end_existing: bool = False,
@@ -76,10 +74,9 @@ async def start_session(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Start a new work session
-    Stores UTC in database, returns IST to client
+    Start a new work session.
+    If force_end_existing=True, auto-ends any active session before creating new one.
     """
-    # Check for active session
     result = await db.execute(
         select(Session).where(
             and_(
@@ -89,18 +86,15 @@ async def start_session(
         )
     )
     active_session = result.scalar_one_or_none()
-    
+
     if active_session:
         if force_end_existing:
-            # End existing session with current UTC time
             current_utc = now_utc()
             active_session.status = calculate_session_status(active_session.total_work_minutes)
             active_session.end_time = current_utc
             await db.commit()
-            
             print(f"✅ Auto-ended existing session: {active_session.id}")
         else:
-            # Return conflict
             raise HTTPException(
                 status_code=409,
                 detail={
@@ -109,29 +103,27 @@ async def start_session(
                     "active_session": active_session.to_dict()
                 }
             )
-    
-    # Get current UTC time for database
+
     current_utc = now_utc()
     current_ist = to_ist(current_utc)
-    
+
     print(f"🕐 Creating session at UTC: {current_utc}")
     print(f"🕐 IST equivalent: {format_ist(current_ist)}")
-    
-    # Create new session with UTC time
+
     new_session = Session(
         employee_id=uuid.UUID(user_id),
-        start_time=current_utc,  # Store UTC
-        status='active',  # Always start as active
+        start_time=current_utc,
+        status='active',
         total_work_minutes=0,
         total_break_minutes=0,
         lunch_taken=False,
         risk_score=0
     )
-    
+
     db.add(new_session)
     await db.commit()
     await db.refresh(new_session)
-    
+
     return {
         "message": "Session started successfully",
         "session": new_session.to_dict(),
@@ -147,11 +139,7 @@ async def end_session(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    End a work session
-    Calculates status based on work completion
-    """
-    # Get session
+    """End a work session. Calculates status based on work completion."""
     result = await db.execute(
         select(Session).where(
             and_(
@@ -161,37 +149,30 @@ async def end_session(
         )
     )
     session = result.scalar_one_or_none()
-    
+
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    
+
     if session.status != 'active':
         raise HTTPException(status_code=400, detail="Session is not active")
-    
-    # Get current UTC time
+
     current_utc = now_utc()
     current_ist = to_ist(current_utc)
-    
-    print(f"🕐 Ending session at UTC: {current_utc}")
-    print(f"🕐 IST equivalent: {format_ist(current_ist)}")
-    
-    # Calculate status based on work completion
     calculated_status = calculate_session_status(data.total_work_minutes)
-    
+
     print(f"📊 Work minutes: {data.total_work_minutes}/400")
     print(f"📊 Calculated status: {calculated_status}")
-    
-    # Update session with UTC time and calculated status
-    session.end_time = current_utc  # Store UTC
+
+    session.end_time = current_utc
     session.total_work_minutes = data.total_work_minutes
     session.total_break_minutes = data.total_break_minutes
     session.lunch_taken = data.lunch_taken
-    session.status = calculated_status  # Use calculated status
+    session.status = calculated_status
     session.session_quality_score = data.session_quality_score
-    
+
     await db.commit()
     await db.refresh(session)
-    
+
     return {
         "message": "Session ended successfully",
         "session": session.to_dict(),
@@ -201,14 +182,17 @@ async def end_session(
     }
 
 
-@router.patch("/{session_id}")
-async def update_session(
+@router.delete("/{session_id}")
+async def delete_session(
     session_id: str,
-    data: SessionUpdate,
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """Update session details"""
+    """
+    Delete a session and all related records.
+    Supabase CASCADE handles abnormalities + work_logs automatically.
+    Used by desktop app when user chooses 'End & Start New' on conflict.
+    """
     result = await db.execute(
         select(Session).where(
             and_(
@@ -218,11 +202,38 @@ async def update_session(
         )
     )
     session = result.scalar_one_or_none()
-    
+
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    
-    # Update fields
+
+    await db.delete(session)
+    await db.commit()
+
+    print(f"🗑️ Deleted session {session_id} for user {user_id}")
+    return {"message": "Session deleted successfully", "session_id": session_id}
+
+
+@router.patch("/{session_id}")
+async def update_session(
+    session_id: str,
+    data: SessionUpdate,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """Update session details."""
+    result = await db.execute(
+        select(Session).where(
+            and_(
+                Session.id == session_id,
+                Session.employee_id == user_id
+            )
+        )
+    )
+    session = result.scalar_one_or_none()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
     if data.total_work_minutes is not None:
         session.total_work_minutes = data.total_work_minutes
     if data.total_break_minutes is not None:
@@ -230,15 +241,37 @@ async def update_session(
     if data.lunch_taken is not None:
         session.lunch_taken = data.lunch_taken
     if data.status is not None:
-        # Only allow manual status override if explicitly provided
         session.status = data.status
-    
+
     await db.commit()
     await db.refresh(session)
-    
+
     return {
         "message": "Session updated successfully",
         "session": session.to_dict()
+    }
+
+
+@router.get("/active")
+async def get_active_session(
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get current active session if any."""
+    result = await db.execute(
+        select(Session).where(
+            and_(
+                Session.employee_id == user_id,
+                Session.status == 'active'
+            )
+        )
+    )
+    session = result.scalar_one_or_none()
+
+    return {
+        "active_session": session.to_dict() if session else None,
+        "current_time_utc": now_utc().isoformat(),
+        "current_time_ist": to_ist(now_utc()).isoformat()
     }
 
 
@@ -250,45 +283,22 @@ async def get_sessions(
     offset: int = Query(0, ge=0),
     status: Optional[str] = None
 ):
-    """Get all sessions for current user"""
+    """Get all sessions for current user."""
     query = select(Session).where(Session.employee_id == user_id)
-    
+
     if status:
         query = query.where(Session.status == status)
-    
+
     query = query.order_by(desc(Session.start_time)).limit(limit).offset(offset)
-    
+
     result = await db.execute(query)
     sessions = result.scalars().all()
-    
+
     return {
         "sessions": [s.to_dict() for s in sessions],
         "total": len(sessions),
         "limit": limit,
         "offset": offset,
-        "current_time_utc": now_utc().isoformat(),
-        "current_time_ist": to_ist(now_utc()).isoformat()
-    }
-
-
-@router.get("/active")
-async def get_active_session(
-    user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-):
-    """Get current active session if any"""
-    result = await db.execute(
-        select(Session).where(
-            and_(
-                Session.employee_id == user_id,
-                Session.status == 'active'
-            )
-        )
-    )
-    session = result.scalar_one_or_none()
-    
-    return {
-        "active_session": session.to_dict() if session else None,
         "current_time_utc": now_utc().isoformat(),
         "current_time_ist": to_ist(now_utc()).isoformat()
     }
@@ -300,7 +310,7 @@ async def get_session(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get session details"""
+    """Get session details."""
     result = await db.execute(
         select(Session).where(
             and_(
@@ -310,10 +320,10 @@ async def get_session(
         )
     )
     session = result.scalar_one_or_none()
-    
+
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    
+
     return session.to_dict()
 
 
@@ -324,8 +334,7 @@ async def create_work_log(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """Create a work time log entry"""
-    # Verify session exists
+    """Create a work time log entry."""
     result = await db.execute(
         select(Session).where(
             and_(
@@ -335,28 +344,26 @@ async def create_work_log(
         )
     )
     session = result.scalar_one_or_none()
-    
+
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    
-    # Convert times to UTC for storage
+
     start_time = to_utc(log_data.start_time)
     end_time = to_utc(log_data.end_time) if log_data.end_time else None
-    
-    # Create work log
+
     work_log = WorkTimeLog(
         session_id=uuid.UUID(session_id),
         log_type=log_data.log_type,
-        start_time=start_time,  # Store UTC
-        end_time=end_time,  # Store UTC
+        start_time=start_time,
+        end_time=end_time,
         duration_minutes=log_data.duration_minutes,
         break_token_used=log_data.break_token_used
     )
-    
+
     db.add(work_log)
     await db.commit()
     await db.refresh(work_log)
-    
+
     return {
         "message": "Work log created successfully",
         "log": work_log.to_dict()
@@ -369,8 +376,7 @@ async def get_work_logs(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get all work logs for a session"""
-    # Verify session access
+    """Get all work logs for a session."""
     result = await db.execute(
         select(Session).where(
             and_(
@@ -380,17 +386,17 @@ async def get_work_logs(
         )
     )
     session = result.scalar_one_or_none()
-    
+
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    
-    # Get logs
+
     result = await db.execute(
-        select(WorkTimeLog).where(WorkTimeLog.session_id == session_id)
+        select(WorkTimeLog)
+        .where(WorkTimeLog.session_id == session_id)
         .order_by(WorkTimeLog.start_time)
     )
     logs = result.scalars().all()
-    
+
     return {
         "logs": [log.to_dict() for log in logs],
         "total": len(logs)
@@ -399,10 +405,10 @@ async def get_work_logs(
 
 @router.get("/debug/time")
 async def debug_time():
-    """Debug endpoint to check current time"""
+    """Debug endpoint to check current time."""
     utc_now = now_utc()
     ist_now = to_ist(utc_now)
-    
+
     return {
         "utc_time": utc_now.isoformat(),
         "ist_time": ist_now.isoformat(),
