@@ -1,24 +1,3 @@
-"""
-SENTINEL Desktop Application
-Main entry point with full detection + dual sync + session management.
-
-DETECTION FEATURES:
-✅ Copy-paste tracking
-✅ Idle period monitoring
-✅ Mechanical/bot detection
-✅ Mouse jiggler detection
-✅ Keyboard sitting detection
-✅ Session-level aggregation (1 DB row per SESSION)
-✅ Local-first storage (SQLite always written first)
-✅ Backend sync via SyncClient background flush
-✅ Detection pauses during breaks/lunch
-✅ sync_now() on session end to guarantee no data loss
-
-SYNC ARCHITECTURE:
-  Layer 1 (instant):  AbnormalityAggregator → SQLite upsert on every detection
-  Layer 2 (interval): SyncClient background flush → Supabase every 60s
-  Layer 3 (on close): sync_now() called at session end, forced final flush
-"""
 import sys
 import asyncio
 from pathlib import Path
@@ -28,6 +7,7 @@ from typing import Optional
 import pytz
 import threading
 import time
+import httpx
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -60,7 +40,7 @@ def parse_datetime_ist(dt_string: str) -> datetime:
             dt = dt.astimezone(IST)
         return dt
     except Exception as e:
-        print(f"⚠️ Error parsing datetime '{dt_string}': {e}")
+        print(f"Warning parsing datetime '{dt_string}': {e}")
         try:
             clean_str = dt_string.split('+')[0].split('.')[0]
             dt = datetime.strptime(clean_str, '%Y-%m-%d %H:%M:%S')
@@ -70,43 +50,38 @@ def parse_datetime_ist(dt_string: str) -> datetime:
 
 
 class SentinelApp:
-    """Complete SENTINEL Application with Production-Grade Detection + Dual Sync"""
 
     def __init__(self):
-        """Initialize SENTINEL application"""
-        # Core infrastructure
         self.jwt_handler = JWTHandler(Config.DB_DIR)
         self.local_db    = LocalDB(Config.DB_PATH)
 
-        # UI components
         self.login_window  = None
         self.main_window   = None
 
-        # Session components (initialized after login)
         self.session_manager:        Optional[SessionManager]        = None
         self.sync_client:            Optional[SyncClient]            = None
         self.input_collector:        Optional[InputCollector]        = None
         self.abnormality_detector:   Optional[AbnormalityDetector]   = None
         self.abnormality_aggregator: Optional[AbnormalityAggregator] = None
 
-        # User data
         self.user          = None
         self.access_token  = None
 
-        # Current session tracking
         self.current_session_id: Optional[str] = None
 
-        # Background task handles
+        # Work log segment tracking (NEW)
+        self._work_segment_start:  Optional[datetime] = None
+        self._break_segment_start: Optional[datetime] = None
+        self._lunch_segment_start: Optional[datetime] = None
+
+        # Hourly productivity metrics accumulator (NEW)
+        self._hourly_metrics: dict = {}
+
         self.detection_task    = None
         self.detection_running = False
-        self.sync_task         = None  # Legacy compat
-
-    # ============================================
-    # APP ENTRY POINT
-    # ============================================
+        self.sync_task         = None
 
     def run(self):
-        """Start the application"""
         print("🛡️ SENTINEL Desktop App Starting...")
         print(f"   Version: 1.0.0")
         print(f"   API: {Config.API_BASE_URL}")
@@ -144,12 +119,7 @@ class SentinelApp:
 
         self.show_login()
 
-    # ============================================
-    # SESSION RECOVERY
-    # ============================================
-
     def check_for_incomplete_session(self) -> Optional[dict]:
-        """Check for incomplete sessions in local database"""
         try:
             session = self.local_db.get_active_session(self.user['id'])
 
@@ -171,8 +141,7 @@ class SentinelApp:
                     print(f"⚠️ Found incomplete session from {minutes_ago:.0f} minutes ago")
                     return session
                 else:
-                    print(f"⚠️ Found old incomplete session "
-                          f"(>{Config.SESSION_RECOVERY_WINDOW_HOURS} hours), marking as abandoned")
+                    print(f"⚠️ Found old incomplete session (>{Config.SESSION_RECOVERY_WINDOW_HOURS} hours), marking as abandoned")
                     self.local_db.update_session(
                         session_id=session['id'],
                         status='abandoned',
@@ -188,7 +157,6 @@ class SentinelApp:
             return None
 
     def show_session_recovery_dialog(self, incomplete_session: dict):
-        """Show dialog to recover incomplete session"""
         root = ctk.CTk()
         root.withdraw()
 
@@ -236,7 +204,8 @@ class SentinelApp:
 
         def continue_session():
             print(f"📋 Continuing session: {incomplete_session['id']}")
-            self.current_session_id = incomplete_session['id']
+            self.current_session_id  = incomplete_session['id']
+            self._work_segment_start = now_ist()
             dialog.destroy()
             root.destroy()
             self.show_main_window()
@@ -277,10 +246,6 @@ class SentinelApp:
         dialog.protocol("WM_DELETE_WINDOW", start_fresh)
         root.mainloop()
 
-    # ============================================
-    # LOGIN / LOGOUT
-    # ============================================
-
     def show_login(self):
         self.login_window = LoginWindow(
             on_login_success=self.on_login_success,
@@ -289,7 +254,6 @@ class SentinelApp:
         self.login_window.mainloop()
 
     def on_login_success(self, user: dict, access_token: str):
-        """Handle successful login"""
         self.user         = user
         self.access_token = access_token
 
@@ -310,42 +274,31 @@ class SentinelApp:
     def logout(self):
         print("\n🚪 Logging out...")
 
-        # Stop detection if running
         self.stop_detection()
 
-        # Stop background flush thread cleanly
         if self.sync_client:
             self.sync_client.stop_background_flush()
             print("  ✓ Sync client stopped")
 
-        # Clear saved tokens
         self.jwt_handler.clear_tokens()
         print("  ✓ Tokens cleared")
 
-        # Close main window
         if self.main_window:
             self.main_window.destroy()
 
-        # Reset user data
-        self.user             = None
-        self.access_token     = None
+        self.user               = None
+        self.access_token       = None
         self.current_session_id = None
-        self.session_manager  = None
-        self.sync_client      = None
+        self.session_manager    = None
+        self.sync_client        = None
 
         print("✓ Logged out successfully")
 
-        # Show login window again
         self.show_login()
-
-    # ============================================
-    # COMPONENT INITIALIZATION
-    # ============================================
 
     def initialize_session_components(self):
         print("\n🔧 Initializing components...")
 
-        # Session manager
         self.session_manager = SessionManager(
             api_base_url=Config.API_BASE_URL,
             access_token=self.access_token,
@@ -355,9 +308,6 @@ class SentinelApp:
         )
         print("  ✓ Session manager initialized")
 
-        # Sync client — dual sync engine
-        # Layer 1 (instant):  AbnormalityAggregator writes SQLite upsert on every detection
-        # Layer 2 (interval): background flush thread pushes to Supabase every N seconds
         self.sync_client = SyncClient(
             api_base_url=Config.API_BASE_URL,
             access_token=self.access_token,
@@ -368,19 +318,15 @@ class SentinelApp:
             sync_interval_seconds=Config.SYNC_INTERVAL_SECONDS
         )
 
-        # Start background flush immediately so any leftover unsynced
-        # records from previous sessions are caught on login
         self.sync_client.start_background_flush()
         print("  ✓ Sync client initialized + background flush started")
 
-        # Input collector with pattern detection callback
         self.input_collector = InputCollector(
             on_pattern_detected=self.on_pattern_detected,
             buffer_size=1000
         )
         print("  ✓ Input collector ready")
 
-        # Abnormality detector with detection callback
         self.abnormality_detector = AbnormalityDetector(
             on_abnormality_detected=self.on_abnormality_detected,
             confidence_threshold=Config.ABNORMALITY_CONFIDENCE_THRESHOLD
@@ -390,14 +336,12 @@ class SentinelApp:
         print("✓ All components initialized")
 
     def show_main_window(self):
-        """Show main work session window"""
         self.main_window = MainWindow(
             user=self.user,
             access_token=self.access_token,
             time_engine=self.session_manager.time_engine
         )
 
-        # Wire up session control callbacks
         self.main_window.on_start_session = self.start_integrated_session
         self.main_window.on_end_session   = self.end_integrated_session
         self.main_window.on_take_break    = self.take_break
@@ -410,13 +354,95 @@ class SentinelApp:
         self.main_window.mainloop()
 
     # ============================================
+    # WORK LOG + PRODUCTIVITY HELPERS (NEW)
+    # ============================================
+
+    def _post_work_log(self, log_type: str, start: datetime, end: datetime, break_token_used: bool = False):
+        duration = int((end - start).total_seconds() / 60)
+        if duration <= 0:
+            return
+
+        def _send():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(
+                    self.session_manager.create_work_log(
+                        log_type=log_type,
+                        start_time=start,
+                        end_time=end,
+                        duration_minutes=duration,
+                        break_token_used=break_token_used,
+                    )
+                )
+                loop.close()
+                print(f"  📋 Work log saved: {log_type} ({duration} min)")
+            except Exception as e:
+                print(f"  ⚠️ Work log post failed: {e}")
+
+        threading.Thread(target=_send, daemon=True).start()
+
+    def _accumulate_hourly_metric(self, activity: dict):
+        hour = datetime.now().hour
+        if hour not in self._hourly_metrics:
+            self._hourly_metrics[hour] = {'keystrokes': 0, 'mouse_moves': 0, 'pastes': 0}
+        self._hourly_metrics[hour]['keystrokes']  = activity.get('total_keystrokes', 0)
+        self._hourly_metrics[hour]['mouse_moves'] = activity.get('total_mouse_movements', 0)
+        self._hourly_metrics[hour]['pastes']      = activity.get('total_pastes', 0)
+
+    def _flush_productivity_metrics(self):
+        if not self._hourly_metrics or not self.session_manager.backend_session_id:
+            return
+
+        metrics_payload = []
+        for hour, data in self._hourly_metrics.items():
+            ks = data.get('keystrokes', 0)
+            mm = data.get('mouse_moves', 0)
+            ps = data.get('pastes', 0)
+            intensity = min(round((ks / max(mm + 1, 1)) * 50, 2), 100.0)
+            metrics_payload.append({
+                "session_id":           self.session_manager.backend_session_id,
+                "hour_of_day":          hour,
+                "activity_intensity":   intensity,
+                "keystroke_count":      ks,
+                "mouse_movement_count": mm,
+                "paste_count":          ps,
+            })
+
+        def _send():
+            try:
+                headers = {
+                    "Authorization": f"Bearer {self.access_token}",
+                    "Content-Type":  "application/json"
+                }
+                with httpx.Client(timeout=10.0) as client:
+                    resp = client.post(
+                        f"{Config.API_BASE_URL}/api/v1/productivity-metrics/bulk",
+                        headers=headers,
+                        json={"metrics": metrics_payload}
+                    )
+                    if resp.status_code == 200:
+                        print(f"  📊 Productivity metrics synced: {len(metrics_payload)} hourly records")
+                    else:
+                        print(f"  ⚠️ Metrics sync failed: {resp.status_code}")
+            except Exception as e:
+                print(f"  ⚠️ Metrics sync error: {e}")
+
+        threading.Thread(target=_send, daemon=True).start()
+        self._hourly_metrics = {}
+
+    # ============================================
     # BREAK & LUNCH
     # ============================================
 
     def take_break(self):
-        """Take a break — STOPS DETECTION"""
         try:
+            if self._work_segment_start:
+                self._post_work_log('work', self._work_segment_start, now_ist())
+                self._work_segment_start = None
+
             self.session_manager.take_break()
+            self._break_segment_start = now_ist()
             print("☕ Break started")
             self.stop_detection()
         except Exception as e:
@@ -426,18 +452,26 @@ class SentinelApp:
                     text=f"Break failed: {str(e)}", text_color="#EF4444")
 
     def end_break(self):
-        """End break and resume work — RESTARTS DETECTION"""
         try:
+            if self._break_segment_start:
+                self._post_work_log('break', self._break_segment_start, now_ist(), break_token_used=True)
+                self._break_segment_start = None
+
             self.session_manager.end_break()
+            self._work_segment_start = now_ist()
             print("▶ Resumed work")
             self.start_detection()
         except Exception as e:
             print(f"❌ Resume failed: {e}")
 
     def take_lunch(self):
-        """Take lunch break — STOPS DETECTION"""
         try:
+            if self._work_segment_start:
+                self._post_work_log('work', self._work_segment_start, now_ist())
+                self._work_segment_start = None
+
             self.session_manager.take_lunch()
+            self._lunch_segment_start = now_ist()
             print("🍽 Lunch started")
             self.stop_detection()
         except Exception as e:
@@ -447,9 +481,13 @@ class SentinelApp:
                     text=f"Lunch failed: {str(e)}", text_color="#EF4444")
 
     def end_lunch(self):
-        """End lunch and resume work — RESTARTS DETECTION"""
         try:
+            if self._lunch_segment_start:
+                self._post_work_log('lunch', self._lunch_segment_start, now_ist())
+                self._lunch_segment_start = None
+
             self.session_manager.end_lunch()
+            self._work_segment_start = now_ist()
             print("▶ Resumed work from lunch")
             self.start_detection()
         except Exception as e:
@@ -460,17 +498,6 @@ class SentinelApp:
     # ============================================
 
     def start_integrated_session(self):
-        """
-        🎯 Start session with full detection + dual sync integration.
-
-        FLOW:
-        1. Check local time engine isn't already running
-        2. Create session in backend
-        3. Save to local DB
-        4. Initialize AbnormalityAggregator (SQLite-only, no HTTP)
-        5. Start detection pipeline
-        6. SyncClient background flush runs independently (not started here)
-        """
         if self.session_manager.time_engine.state.value != 'idle':
             print("⚠️ Session already running locally")
             if self.main_window:
@@ -514,8 +541,7 @@ class SentinelApp:
                     backend_session_id=result.get('backend_session_id')
                 )
                 print(f"\n✅ New session started: {self.current_session_id}")
-                print(f"   Backend session ID: "
-                      f"{result.get('backend_session_id', 'offline')}")
+                print(f"   Backend session ID: {result.get('backend_session_id', 'offline')}")
             else:
                 print(f"\n▶️ Continuing session: {self.current_session_id}")
                 if result.get('backend_session_id'):
@@ -525,6 +551,9 @@ class SentinelApp:
                     )
 
             print(f"   Backend synced: {result.get('synced', False)}")
+
+            self._work_segment_start = now_ist()
+            self._hourly_metrics     = {}
 
             self.abnormality_aggregator = AbnormalityAggregator(
                 session_id=self.current_session_id,
@@ -553,24 +582,15 @@ class SentinelApp:
                     text=f"Failed to start session: {str(e)}", text_color="#EF4444")
 
     def end_integrated_session(self):
-        """
-        🎯 End session with full integration + sync finalization
-
-        FLOW:
-        1. STOP DETECTION FIRST
-        2. Flush aggregator (final SQLite write)
-        3. sync_now() — synchronous forced push to Supabase
-        4. End session in backend
-        5. Update local DB with final stats + risk score
-        6. Show summary in UI
-        7. Clear detection data
-        8. Stop background flush thread
-        """
         try:
-            # 1. Stop detection first — no more input collection
             self.stop_detection()
 
-            # 2. Flush aggregator — writes final state to SQLite
+            if self._work_segment_start:
+                self._post_work_log('work', self._work_segment_start, now_ist())
+                self._work_segment_start = None
+
+            self._flush_productivity_metrics()
+
             if self.abnormality_aggregator:
                 print("\n📊 Finalizing abnormality summary...")
                 self.abnormality_aggregator.flush()
@@ -585,20 +605,16 @@ class SentinelApp:
 
                 self.abnormality_aggregator = None
 
-            # 3. Force-push all remaining unsynced SQLite records to Supabase
-            # sync_now() is synchronous — no event loop needed here
             try:
                 self.sync_client.sync_now()
             except Exception as e:
                 print(f"  ⚠️ Final sync error (data still safe in local DB): {e}")
 
-            # 4. End session in backend
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             summary = loop.run_until_complete(self.session_manager.end_session())
             loop.close()
 
-            # 5. Calculate final risk score and update local DB
             risk_score = 0.0
             if self.current_session_id:
                 risk_score = self.abnormality_detector.get_risk_score()
@@ -613,24 +629,22 @@ class SentinelApp:
                     risk_score=risk_score
                 )
 
-            # 6. Show summary in main window
             if self.main_window:
                 self.main_window.show_session_summary(summary)
 
             print(f"\n✅ Session ended")
             print(f"   Work: {summary['work_minutes']} min")
             print(f"   Break: {summary['break_minutes']} min")
+            print(f"   Lunch: {summary['lunch_taken']}")
             print(f"   Risk Score: {risk_score:.1f}/100")
 
-            # 7. Clear detection data
             self.abnormality_detector.clear_session()
             self.input_collector.clear_buffers()
             self.current_session_id = None
+            self._hourly_metrics    = {}
 
-            # 8. Stop background flush — session is over
             self.sync_client.stop_background_flush()
 
-            # Update button to Logout
             if self.main_window:
                 self.main_window.session_button.configure(
                     text="Logout",
@@ -649,15 +663,6 @@ class SentinelApp:
     # ============================================
 
     def start_detection(self):
-        """
-        Start detection pipeline.
-
-        Components:
-          1. Input Collector (keyboard/mouse hooks)
-          2. Detection Loop (background thread, runs every 30s)
-
-        SyncClient background flush runs independently — not started here.
-        """
         if self.detection_running:
             print("⚠️ Detection already running")
             return
@@ -679,12 +684,6 @@ class SentinelApp:
         print("  ✓ Detection loop started (analyzing every 30s)")
 
     def stop_detection(self):
-        """
-        Stop detection pipeline.
-
-        Called when: taking break, taking lunch, ending session.
-        Does NOT stop SyncClient background flush.
-        """
         if not self.detection_running:
             return
         print("⏸️ Stopping detection...")
@@ -694,15 +693,6 @@ class SentinelApp:
         print("  ✓ Detection stopped")
 
     def _detection_loop(self):
-        """
-        Background detection loop — runs every 30 seconds.
-
-        Steps per cycle:
-          1. Get input patterns from collector
-          2. Get activity summary
-          3. Run all detection algorithms
-          4. Pass abnormalities to aggregator (SQLite upsert, no HTTP)
-        """
         print("🔄 Detection loop running...")
 
         detection_interval = 30
@@ -717,7 +707,6 @@ class SentinelApp:
 
                 print(f"\n📊 Detection Check [{datetime.now().strftime('%H:%M:%S')}]:")
                 if not self.detection_running:
-                    # Bail out — detection was stopped while we were getting state
                     break
 
                 print(f"   State: {state['state']}")
@@ -728,6 +717,8 @@ class SentinelApp:
                 print(f"   Mouse moves: {activity.get('total_mouse_movements', 0)}")
                 print(f"   Pattern: {pattern.get('status', 'unknown')}")
 
+                self._accumulate_hourly_metric(activity)
+
                 abnormalities = self.abnormality_detector.run_comprehensive_analysis(
                     keystroke_pattern=pattern,
                     activity_summary=activity,
@@ -737,18 +728,14 @@ class SentinelApp:
                 if abnormalities:
                     print(f"  🚨 Detected {len(abnormalities)} abnormality(ies)!")
                     for abn in abnormalities:
-                        # Route directly to aggregator — do NOT call on_abnormality_detected
-                        # here to avoid double-save (detector callback already fired above)
                         self._save_abnormality_to_aggregator(abn)
                 else:
                     print("  ✅ No abnormalities detected")
 
-                # Log sync status periodically
                 if self.sync_client:
                     sync_status = self.sync_client.get_sync_status()
                     if sync_status.get('total_pending', 0) > 0:
-                        print(f"  📡 Pending sync: "
-                              f"{sync_status['total_pending']} record(s)")
+                        print(f"  📡 Pending sync: {sync_status['total_pending']} record(s)")
 
             except Exception as e:
                 print(f"❌ Detection error: {e}")
@@ -764,34 +751,18 @@ class SentinelApp:
     # ============================================
 
     def on_session_state_change(self, state, data):
-        """Handle session state changes from TimeEngine/SessionManager"""
         print(f"📊 Session state changed: {state.value}")
         if self.main_window:
             self.main_window.update_state_ui(state, data)
 
     def on_sync_complete(self, summary):
-        """Handle sync completion callback from SyncClient"""
         print(f"✓ Sync complete: {summary.get('sessions_synced', 0)} sessions, "
               f"{summary.get('abnormalities_synced', 0)} abnormalities")
 
     def on_sync_error(self, error):
-        """Handle sync error callback from SyncClient"""
         print(f"⚠️ Sync error: {error}")
 
     def on_pattern_detected(self, pattern):
-        """
-        Handle detected input patterns from InputCollector.
-
-        Patterns:
-          large_paste      → suspicious_paste
-          rapid_paste      → rapid_paste
-          keyboard_sitting → minimal_activity
-          mouse_jiggler    → mouse_jiggler
-          idle_period      → long_idle
-
-        Passes to AbnormalityAggregator which does a SQLite upsert.
-        No HTTP calls here.
-        """
         pattern_type = pattern.get('type')
         confidence   = pattern.get('confidence', 0)
         details      = pattern.get('details', 'N/A')
@@ -803,9 +774,12 @@ class SentinelApp:
         pattern_to_abnormality = {
             'large_paste':      'suspicious_paste',
             'rapid_paste':      'rapid_paste',
-            'keyboard_sitting': 'minimal_activity',
+            'keyboard_sitting': 'keyboard_sitting',
             'mouse_jiggler':    'mouse_jiggler',
-            'idle_period':      'long_idle'
+            'idle_period':      'long_idle',
+            'burst_then_idle':  'burst_then_idle',
+            'activity_burst':   'activity_burst',
+            'clock_in_out':     'clock_in_clock_out',
         }
 
         abnormality_type = pattern_to_abnormality.get(pattern_type)
@@ -828,11 +802,6 @@ class SentinelApp:
             ))
 
     def on_abnormality_detected(self, abnormality: Abnormality):
-        """
-        Callback fired by AbnormalityDetector._report_abnormality().
-        Only updates the UI — aggregator save is handled separately by
-        _save_abnormality_to_aggregator() to prevent double-counting.
-        """
         abn_label = (
             abnormality.abnormality_type.value
             if hasattr(abnormality.abnormality_type, 'value')
@@ -854,10 +823,6 @@ class SentinelApp:
             self.main_window.after(0, update_ui)
 
     def _save_abnormality_to_aggregator(self, abnormality: Abnormality):
-        """
-        Save a detected abnormality to the aggregator (SQLite upsert).
-        Called ONLY from _detection_loop — single write path, no double-save.
-        """
         if not self.abnormality_aggregator:
             print(f"  ⚠️ Aggregator not initialized, skipping save")
             return
@@ -879,7 +844,6 @@ class SentinelApp:
     # ============================================
 
     def show_session_conflict_dialog(self, existing_session: dict):
-        """Show dialog when an active session already exists on backend."""
         dialog = ctk.CTkToplevel(self.main_window)
         dialog.title("Active Session Found")
         dialog.geometry("500x300")
@@ -906,7 +870,7 @@ class SentinelApp:
         start_time = existing_session.get('start_time', '')
         if start_time:
             try:
-                start_dt      = parse_datetime_ist(start_time)
+                start_dt       = parse_datetime_ist(start_time)
                 start_time_str = start_dt.strftime('%I:%M %p on %B %d')
             except Exception:
                 start_time_str = start_time
@@ -928,11 +892,39 @@ class SentinelApp:
 
         def continue_session():
             dialog.destroy()
-            if self.main_window:
-                self.main_window.status_label.configure(
-                    text="Continuing existing session (not yet implemented)",
-                    text_color="#F59E0B"
+            try:
+                existing_backend_id = existing_session.get('id')
+                existing_local_id   = self.current_session_id
+
+                if existing_local_id and existing_backend_id:
+                    self.local_db.update_session(
+                        session_id=existing_local_id,
+                        backend_session_id=existing_backend_id,
+                        status='active'
+                    )
+                    self.session_manager.backend_session_id = existing_backend_id
+
+                self.abnormality_aggregator = AbnormalityAggregator(
+                    session_id=existing_local_id or str(uuid.uuid4()),
+                    local_db=self.local_db,
+                    sync_client=self.sync_client
                 )
+                self._work_segment_start = now_ist()
+                self.start_detection()
+
+                print(f"▶️ Continuing existing session: {existing_backend_id}")
+                if self.main_window:
+                    self.main_window.status_label.configure(
+                        text="✅ Continuing existing session",
+                        text_color="#10B981"
+                    )
+            except Exception as e:
+                print(f"❌ Failed to continue session: {e}")
+                if self.main_window:
+                    self.main_window.status_label.configure(
+                        text=f"Failed to continue session: {str(e)}",
+                        text_color="#EF4444"
+                    )
 
         ctk.CTkButton(
             button_frame,
@@ -947,7 +939,6 @@ class SentinelApp:
         def end_and_start_new():
             dialog.destroy()
             try:
-                # 1. Delete from Supabase — CASCADE kills abnormalities + work_logs
                 old_local = self.local_db.get_session(self.current_session_id) \
                     if self.current_session_id else None
                 old_backend_id = old_local.get('backend_session_id') if old_local else None
@@ -956,22 +947,17 @@ class SentinelApp:
                     print(f"🗑️ Deleting backend session {old_backend_id[:8]}...")
                     self.sync_client.delete_session_now(old_backend_id)
 
-                # 2. Delete from local SQLite
                 if self.current_session_id:
                     self.local_db.delete_session(self.current_session_id)
                     print(f"🗑️ Cleared local session {self.current_session_id[:8]}...")
 
-                # 3. Reset time engine to IDLE so start_session() guard passes
-                self.session_manager.time_engine.state             = SessionState.IDLE
+                self.session_manager.time_engine.state              = SessionState.IDLE
                 self.session_manager.time_engine.session_start_time = None
-                self.session_manager.time_engine.work_start_time   = None
-                self.session_manager.backend_session_id            = None
+                self.session_manager.time_engine.work_start_time    = None
+                self.session_manager.backend_session_id             = None
 
-                # 4. Fresh session ID
                 self.current_session_id = str(uuid.uuid4())
 
-                # 5. Start — force_end_existing=True handles any remaining
-                #    backend ghost session (e.g. created from another device)
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 result = loop.run_until_complete(
@@ -991,6 +977,8 @@ class SentinelApp:
                         local_db=self.local_db,
                         sync_client=self.sync_client
                     )
+                    self._work_segment_start = now_ist()
+                    self._hourly_metrics     = {}
                     self.start_detection()
                     print(f"\n✅ New session started: {self.current_session_id}")
                     if self.main_window:
@@ -1024,10 +1012,6 @@ class SentinelApp:
             hover_color="#DC2626"
         ).pack(side="right", expand=True, fill="x", padx=(10, 0))
 
-
-# ============================================
-# ENTRY POINT
-# ============================================
 
 def main():
     try:
