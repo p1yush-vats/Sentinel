@@ -7,7 +7,7 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'https://sentinel-hrke.onrender.com/',
         changeOrigin: true,
       }
     }

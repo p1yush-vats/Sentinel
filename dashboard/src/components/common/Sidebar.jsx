@@ -2,9 +2,9 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import {
   LayoutDashboard, Users, Clock, AlertTriangle, BarChart3,
-  Calendar, MessageSquare, ScrollText, Settings, LogOut, Shield, X
+  Calendar, MessageSquare, ScrollText, Settings, LogOut, X
 } from 'lucide-react'
-
+import sentinelLogo from '../../img/sentinel.svg'
 const NAV = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/employees', icon: Users,           label: 'Employees' },
@@ -29,14 +29,13 @@ export default function Sidebar({ flagCount = 0, onClose }) {
       <div className="px-5 py-4 border-b border-sentinel-border flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-cyan-400/10 border border-cyan-400/30 flex items-center justify-center">
-            <Shield size={16} className="text-cyan-400" />
+            <img src={sentinelLogo} alt="Sentinel" className="w-full h-full object-contain" />
           </div>
           <div>
             <span className="font-display font-bold text-base text-sentinel-text tracking-wide">SENTINEL</span>
             <p className="text-[10px] font-mono text-sentinel-muted tracking-widest uppercase">Admin Console</p>
           </div>
         </div>
-        {/* Close button — mobile only */}
         {onClose && (
           <button
             onClick={onClose}
