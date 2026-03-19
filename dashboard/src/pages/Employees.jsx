@@ -1,4 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
+import { createPortal } from 'react-dom'
+import { useNavigate } from 'react-router-dom'
 import { Search, UserPlus, UserCheck, UserX, X, Upload, Camera } from 'lucide-react'
 import { employeesAPI } from '../services/api'
 import { initials, deptColor, riskBadge, fmtDate } from '../utils/helpers'
@@ -18,7 +20,7 @@ function Avatar({ employee, size = 'md' }) {
         alt={employee.full_name}
         className={`${sizes[size]} rounded-full object-cover border-2`}
         style={{ borderColor: color + '40' }}
-        onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex' }}
+        onError={e => { e.target.style.display = 'none' }}
       />
     )
   }
@@ -42,6 +44,12 @@ function RegisterModal({ onClose, onSuccess }) {
   const [loading,  setLoading]  = useState(false)
   const [errors,   setErrors]   = useState({})
   const fileRef = useRef()
+
+  // Prevent body scroll when modal is open
+  useEffect(() => {
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = '' }
+  }, [])
 
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
@@ -82,26 +90,40 @@ function RegisterModal({ onClose, onSuccess }) {
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+  return createPortal(
+    /* Full-screen fixed overlay — rendered directly on document.body,
+       bypasses sidebar transform stacking context completely */
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+    >
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        onClick={onClose}
+      />
 
-      <div className="relative w-full max-w-2xl bg-navy-800 border border-sentinel-border rounded-2xl shadow-2xl animate-fade-in overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-sentinel-border">
+      {/* Modal panel — scrolls internally on small screens */}
+      <div className="relative w-full max-w-2xl bg-navy-800 border border-sentinel-border rounded-2xl shadow-2xl flex flex-col max-h-[92vh] animate-fade-in">
+
+        {/* Sticky header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-sentinel-border shrink-0">
           <div>
             <h2 className="font-display font-bold text-lg text-sentinel-text">Register Employee</h2>
             <p className="text-xs font-mono text-sentinel-muted mt-0.5">Add a new employee to SENTINEL</p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-navy-700 flex items-center justify-center text-sentinel-muted hover:text-sentinel-text transition-colors">
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-lg hover:bg-navy-700 flex items-center justify-center text-sentinel-muted hover:text-sentinel-text transition-colors"
+          >
             <X size={16} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto max-h-[80vh]">
+        {/* Scrollable body */}
+        <div className="overflow-y-auto flex-1 px-6 py-5">
           {/* Avatar upload */}
           <div className="flex items-center gap-5 mb-6">
-            <div className="relative">
+            <div className="relative shrink-0">
               <div
                 onClick={() => fileRef.current?.click()}
                 className="w-20 h-20 rounded-full border-2 border-dashed border-sentinel-border hover:border-cyan-400/40 flex items-center justify-center cursor-pointer transition-all duration-200 overflow-hidden bg-navy-900 group"
@@ -116,8 +138,11 @@ function RegisterModal({ onClose, onSuccess }) {
                 )}
               </div>
               {preview && (
-                <button type="button" onClick={() => { setPreview(null); set('avatar_url', '') }}
-                  className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => { setPreview(null); set('avatar_url', '') }}
+                  className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 flex items-center justify-center"
+                >
                   <X size={10} className="text-white" />
                 </button>
               )}
@@ -126,106 +151,156 @@ function RegisterModal({ onClose, onSuccess }) {
             <div>
               <p className="text-sm text-sentinel-text font-medium">Profile Photo</p>
               <p className="text-xs font-mono text-sentinel-muted mt-1">JPG, PNG up to 2MB</p>
-              <button type="button" onClick={() => fileRef.current?.click()}
-                className="mt-2 flex items-center gap-1.5 text-xs font-mono text-cyan-400 hover:text-cyan-300 transition-colors">
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className="mt-2 flex items-center gap-1.5 text-xs font-mono text-cyan-400 hover:text-cyan-300 transition-colors"
+              >
                 <Upload size={12} /> Upload photo
               </button>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Full name */}
-            <div className="md:col-span-2">
-              <label className="label mb-1.5 block">Full Name *</label>
-              <input value={form.full_name} onChange={e => set('full_name', e.target.value)}
-                className={`input-field ${errors.full_name ? 'border-red-500/50' : ''}`} placeholder="Arjun Sharma" />
-              {errors.full_name && <p className="text-red-400 text-xs font-mono mt-1">{errors.full_name}</p>}
-            </div>
+          <form id="register-form" onSubmit={handleSubmit}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Full name */}
+              <div className="sm:col-span-2">
+                <label className="label mb-1.5 block">Full Name *</label>
+                <input
+                  value={form.full_name}
+                  onChange={e => set('full_name', e.target.value)}
+                  className={`input-field ${errors.full_name ? 'border-red-500/50' : ''}`}
+                  placeholder="Arjun Sharma"
+                />
+                {errors.full_name && <p className="text-red-400 text-xs font-mono mt-1">{errors.full_name}</p>}
+              </div>
 
-            {/* Email */}
-            <div>
-              <label className="label mb-1.5 block">Email *</label>
-              <input type="email" value={form.email} onChange={e => set('email', e.target.value)}
-                className={`input-field ${errors.email ? 'border-red-500/50' : ''}`} placeholder="arjun@company.com" />
-              {errors.email && <p className="text-red-400 text-xs font-mono mt-1">{errors.email}</p>}
-            </div>
+              {/* Email */}
+              <div>
+                <label className="label mb-1.5 block">Email *</label>
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={e => set('email', e.target.value)}
+                  className={`input-field ${errors.email ? 'border-red-500/50' : ''}`}
+                  placeholder="arjun@company.com"
+                />
+                {errors.email && <p className="text-red-400 text-xs font-mono mt-1">{errors.email}</p>}
+              </div>
 
-            {/* Password */}
-            <div>
-              <label className="label mb-1.5 block">Password *</label>
-              <input type="password" value={form.password} onChange={e => set('password', e.target.value)}
-                className={`input-field ${errors.password ? 'border-red-500/50' : ''}`} placeholder="Min 6 characters" />
-              {errors.password && <p className="text-red-400 text-xs font-mono mt-1">{errors.password}</p>}
-            </div>
+              {/* Password */}
+              <div>
+                <label className="label mb-1.5 block">Password *</label>
+                <input
+                  type="password"
+                  value={form.password}
+                  onChange={e => set('password', e.target.value)}
+                  className={`input-field ${errors.password ? 'border-red-500/50' : ''}`}
+                  placeholder="Min 6 characters"
+                />
+                {errors.password && <p className="text-red-400 text-xs font-mono mt-1">{errors.password}</p>}
+              </div>
 
-            {/* Department */}
-            <div>
-              <label className="label mb-1.5 block">Department</label>
-              <select value={form.department} onChange={e => set('department', e.target.value)} className="input-field">
-                {DEPARTMENTS.map(d => <option key={d}>{d}</option>)}
-              </select>
-            </div>
+              {/* Department */}
+              <div>
+                <label className="label mb-1.5 block">Department</label>
+                <select value={form.department} onChange={e => set('department', e.target.value)} className="input-field">
+                  {DEPARTMENTS.map(d => <option key={d}>{d}</option>)}
+                </select>
+              </div>
 
-            {/* Role */}
-            <div>
-              <label className="label mb-1.5 block">Role</label>
-              <select value={form.role} onChange={e => set('role', e.target.value)} className="input-field">
-                {ROLES.map(r => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
-              </select>
-            </div>
+              {/* Role */}
+              <div>
+                <label className="label mb-1.5 block">Role</label>
+                <select value={form.role} onChange={e => set('role', e.target.value)} className="input-field">
+                  {ROLES.map(r => (
+                    <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>
+                  ))}
+                </select>
+              </div>
 
-            {/* Position */}
-            <div>
-              <label className="label mb-1.5 block">Position / Title</label>
-              <input value={form.position} onChange={e => set('position', e.target.value)}
-                className="input-field" placeholder="Senior Developer" />
-            </div>
+              {/* Position */}
+              <div>
+                <label className="label mb-1.5 block">Position / Title</label>
+                <input
+                  value={form.position}
+                  onChange={e => set('position', e.target.value)}
+                  className="input-field"
+                  placeholder="Senior Developer"
+                />
+              </div>
 
-            {/* Employee code */}
-            <div>
-              <label className="label mb-1.5 block">Employee ID</label>
-              <input value={form.employee_code} onChange={e => set('employee_code', e.target.value)}
-                className="input-field" placeholder="EMP-001" />
-            </div>
+              {/* Employee code */}
+              <div>
+                <label className="label mb-1.5 block">Employee ID</label>
+                <input
+                  value={form.employee_code}
+                  onChange={e => set('employee_code', e.target.value)}
+                  className="input-field"
+                  placeholder="EMP-001"
+                />
+              </div>
 
-            {/* Phone */}
-            <div className="md:col-span-2">
-              <label className="label mb-1.5 block">Phone</label>
-              <input value={form.phone} onChange={e => set('phone', e.target.value)}
-                className="input-field" placeholder="+91 98765 43210" />
+              {/* Phone */}
+              <div className="sm:col-span-2">
+                <label className="label mb-1.5 block">Phone</label>
+                <input
+                  value={form.phone}
+                  onChange={e => set('phone', e.target.value)}
+                  className="input-field"
+                  placeholder="+91 98765 43210"
+                />
+              </div>
             </div>
-          </div>
+          </form>
+        </div>
 
-          {/* Footer */}
-          <div className="flex gap-3 mt-6 pt-5 border-t border-sentinel-border">
-            <button type="button" onClick={onClose} className="btn-ghost flex-1">Cancel</button>
-            <button type="submit" disabled={loading} className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-50">
-              {loading ? (
-                <><div className="w-4 h-4 border-2 border-navy-950/30 border-t-navy-950 rounded-full animate-spin" /> Registering...</>
-              ) : (
-                <><UserPlus size={14} /> Register Employee</>
-              )}
-            </button>
-          </div>
-        </form>
+        {/* Sticky footer with buttons */}
+        <div className="flex gap-3 px-6 py-4 border-t border-sentinel-border shrink-0">
+          <button type="button" onClick={onClose} className="btn-ghost flex-1">
+            Cancel
+          </button>
+          <button
+            type="submit"
+            form="register-form"
+            disabled={loading}
+            className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {loading ? (
+              <>
+                <div className="w-4 h-4 border-2 border-navy-950/30 border-t-navy-950 rounded-full animate-spin" />
+                Registering...
+              </>
+            ) : (
+              <>
+                <UserPlus size={14} /> Register Employee
+              </>
+            )}
+          </button>
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
 function EmployeeCard({ employee, onToggleActive }) {
   const color = deptColor(employee.department)
-  return (
-    <div className="card overflow-hidden transition-all duration-300 hover:border-cyan-400/15 animate-fade-in">
-      {/* Top accent bar */}
-      <div className="h-1 w-full" style={{ backgroundColor: color + '60' }} />
+  const navigate = useNavigate()
 
+  return (
+    <div
+      onClick={() => navigate(`/employees/${employee.id}`)}
+      className="card overflow-hidden transition-all duration-300 hover:border-cyan-400/25 hover:shadow-glow-cyan cursor-pointer animate-fade-in group"
+    >
+      <div className="h-1 w-full transition-all duration-300" style={{ backgroundColor: color + '60' }} />
       <div className="p-5">
-        {/* Avatar + name row */}
         <div className="flex items-center gap-3 mb-4">
           <Avatar employee={employee} size="md" />
           <div className="flex-1 min-w-0">
-            <p className="font-semibold text-sentinel-text text-sm leading-tight truncate">{employee.full_name}</p>
+            <p className="font-semibold text-sentinel-text text-sm leading-tight truncate group-hover:text-cyan-300 transition-colors">
+              {employee.full_name}
+            </p>
             <p className="text-xs font-mono mt-0.5 truncate" style={{ color }}>
               {employee.position || employee.department || '—'}
             </p>
@@ -235,7 +310,6 @@ function EmployeeCard({ employee, onToggleActive }) {
           </span>
         </div>
 
-        {/* Details */}
         <div className="space-y-1.5 mb-4">
           <p className="text-xs font-mono text-sentinel-muted truncate">{employee.email}</p>
           <div className="flex items-center gap-3">
@@ -244,7 +318,6 @@ function EmployeeCard({ employee, onToggleActive }) {
           </div>
         </div>
 
-        {/* Footer row */}
         <div className="flex items-center justify-between pt-3 border-t border-sentinel-border/50">
           <div className="flex items-center gap-2">
             <span className={riskBadge(employee.risk_score || 0)}>
@@ -253,13 +326,15 @@ function EmployeeCard({ employee, onToggleActive }) {
             <span className="badge-ok capitalize text-[10px]">{employee.role}</span>
           </div>
           <button
-            onClick={() => onToggleActive(employee)}
+            onClick={e => { e.stopPropagation(); onToggleActive(employee) }}
             className={`flex items-center gap-1 text-[11px] font-mono px-2 py-1 rounded-md border transition-all duration-200
               ${employee.is_active
                 ? 'border-red-500/20 text-red-400 hover:bg-red-400/10'
                 : 'border-emerald-500/20 text-emerald-400 hover:bg-emerald-400/10'}`}
           >
-            {employee.is_active ? <><UserX size={10} /> Deactivate</> : <><UserCheck size={10} /> Activate</>}
+            {employee.is_active
+              ? <><UserX size={10} /> Deactivate</>
+              : <><UserCheck size={10} /> Activate</>}
           </button>
         </div>
       </div>
@@ -279,7 +354,10 @@ export default function Employees() {
   const load = () => {
     setLoading(true)
     employeesAPI.getAll({ limit: 200 })
-      .then(r => { setEmployees(r.data?.employees || []); setFiltered(r.data?.employees || []) })
+      .then(r => {
+        setEmployees(r.data?.employees || [])
+        setFiltered(r.data?.employees || [])
+      })
       .catch(() => toast.error('Failed to load employees'))
       .finally(() => setLoading(false))
   }
@@ -304,7 +382,9 @@ export default function Employees() {
       await employeesAPI.update(emp.id, { is_active: !emp.is_active })
       setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, is_active: !e.is_active } : e))
       toast.success(`${emp.full_name} ${emp.is_active ? 'deactivated' : 'activated'}`)
-    } catch { toast.error('Failed to update employee') }
+    } catch {
+      toast.error('Failed to update employee')
+    }
   }
 
   const onRegisterSuccess = (newEmp) => {
@@ -313,7 +393,13 @@ export default function Employees() {
 
   return (
     <div className="space-y-5">
-      {showModal && <RegisterModal onClose={() => setShowModal(false)} onSuccess={onRegisterSuccess} />}
+      {/* Modal rendered via portal-like z-50 fixed overlay */}
+      {showModal && (
+        <RegisterModal
+          onClose={() => setShowModal(false)}
+          onSuccess={onRegisterSuccess}
+        />
+      )}
 
       {/* Header */}
       <div className="flex items-center justify-between animate-fade-in">
@@ -322,7 +408,7 @@ export default function Employees() {
           <p className="text-sentinel-muted text-sm font-mono mt-1">{filtered.length} of {employees.length} shown</p>
         </div>
         <button onClick={() => setShowModal(true)} className="btn-primary flex items-center gap-2">
-          <UserPlus size={15} /> Register Employee
+          <UserPlus size={15} /> <span className="hidden sm:inline">Register Employee</span><span className="sm:hidden">Add</span>
         </button>
       </div>
 
@@ -332,11 +418,17 @@ export default function Employees() {
       <div className="flex flex-wrap gap-3 animate-fade-in stagger-1">
         <div className="relative flex-1 min-w-48">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-sentinel-muted" />
-          <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search name, email, or ID..." className="input-field pl-9" />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search name, email, or ID..."
+            className="input-field pl-9"
+          />
         </div>
         <select value={dept} onChange={e => setDept(e.target.value)} className="input-field w-auto">
-          {departments.map(d => <option key={d} value={d}>{d === 'all' ? 'All Departments' : d}</option>)}
+          {departments.map(d => (
+            <option key={d} value={d}>{d === 'all' ? 'All Departments' : d}</option>
+          ))}
         </select>
         <div className="flex border border-sentinel-border rounded-lg overflow-hidden">
           {[['grid', '⊞'], ['list', '☰']].map(([v, icon]) => (
@@ -385,7 +477,6 @@ export default function Employees() {
                   <th className="label text-left px-5 py-3 hidden md:table-cell">Department</th>
                   <th className="label text-left px-5 py-3 hidden lg:table-cell">Position</th>
                   <th className="label text-left px-5 py-3 hidden lg:table-cell">Joined</th>
-                  <th className="label text-left px-5 py-3">Risk</th>
                   <th className="label text-left px-5 py-3">Status</th>
                   <th className="label text-left px-5 py-3">Actions</th>
                 </tr>
@@ -394,7 +485,7 @@ export default function Employees() {
                 {loading ? (
                   Array(6).fill(0).map((_, i) => (
                     <tr key={i} className="table-row">
-                      <td colSpan={7} className="px-5 py-3">
+                      <td colSpan={6} className="px-5 py-3">
                         <div className="h-4 bg-navy-700 rounded animate-pulse" />
                       </td>
                     </tr>
@@ -411,7 +502,9 @@ export default function Employees() {
                       </div>
                     </td>
                     <td className="px-5 py-3 hidden md:table-cell">
-                      <span className="text-sm font-mono" style={{ color: deptColor(emp.department) }}>{emp.department || '—'}</span>
+                      <span className="text-sm font-mono" style={{ color: deptColor(emp.department) }}>
+                        {emp.department || '—'}
+                      </span>
                     </td>
                     <td className="px-5 py-3 hidden lg:table-cell">
                       <span className="text-sm text-sentinel-muted">{emp.position || '—'}</span>
@@ -420,17 +513,18 @@ export default function Employees() {
                       <span className="text-sm font-mono text-sentinel-muted">{fmtDate(emp.created_at)}</span>
                     </td>
                     <td className="px-5 py-3">
-                      <span className={riskBadge(emp.risk_score || 0)}>{Math.round(emp.risk_score || 0)}</span>
-                    </td>
-                    <td className="px-5 py-3">
                       <span className={emp.is_active ? 'badge-low' : 'badge-critical'}>
                         {emp.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
                     <td className="px-5 py-3">
-                      <button onClick={() => toggleActive(emp)}
+                      <button
+                        onClick={() => toggleActive(emp)}
                         className={`flex items-center gap-1 text-xs font-mono px-2.5 py-1 rounded-lg border transition-all
-                          ${emp.is_active ? 'border-red-500/20 text-red-400 hover:bg-red-400/10' : 'border-emerald-500/20 text-emerald-400 hover:bg-emerald-400/10'}`}>
+                          ${emp.is_active
+                            ? 'border-red-500/20 text-red-400 hover:bg-red-400/10'
+                            : 'border-emerald-500/20 text-emerald-400 hover:bg-emerald-400/10'}`}
+                      >
                         {emp.is_active ? <UserX size={11} /> : <UserCheck size={11} />}
                         {emp.is_active ? 'Deactivate' : 'Activate'}
                       </button>

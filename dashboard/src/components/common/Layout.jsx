@@ -2,29 +2,67 @@ import { Outlet } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import Sidebar from './Sidebar'
 import { flagsAPI } from '../../services/api'
+import { Menu, X } from 'lucide-react'
 
 export default function Layout() {
-  const [flagCount, setFlagCount] = useState(0)
+  const [flagCount,    setFlagCount]    = useState(0)
+  const [sidebarOpen,  setSidebarOpen]  = useState(false)
 
   useEffect(() => {
-    flagsAPI.getUnreviewed({ limit: 1 })
-      .then(r => setFlagCount(r.data?.total || 0))
-      .catch(() => {})
-
-    const interval = setInterval(() => {
-      flagsAPI.getUnreviewed({ limit: 1 })
-        .then(r => setFlagCount(r.data?.total || 0))
+    const fetch = () => {
+      flagsAPI.getUnreviewed({ limit: 100 })
+        .then(r => setFlagCount(r.data?.total || r.data?.abnormalities?.length || 0))
         .catch(() => {})
-    }, 30000)
-
+    }
+    fetch()
+    const interval = setInterval(fetch, 30000)
     return () => clearInterval(interval)
   }, [])
 
+  // Close sidebar on route change (mobile)
+  useEffect(() => {
+    setSidebarOpen(false)
+  }, [location.pathname])
+
   return (
     <div className="flex min-h-screen bg-sentinel-bg grid-bg">
-      <Sidebar flagCount={flagCount} />
-      <main className="flex-1 overflow-auto">
-        <div className="p-6 lg:p-8 animate-fade-in">
+
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-20 bg-black/60 backdrop-blur-sm lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar — fixed on mobile (slide in), static on desktop */}
+      <div className={`
+        fixed inset-y-0 left-0 z-30 w-64 transform transition-transform duration-300 ease-in-out
+        lg:static lg:translate-x-0 lg:z-auto
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+      `}>
+        <Sidebar flagCount={flagCount} onClose={() => setSidebarOpen(false)} />
+      </div>
+
+      {/* Main content */}
+      <main className="flex-1 min-w-0 overflow-auto">
+        {/* Mobile top bar */}
+        <div className="lg:hidden flex items-center gap-3 px-4 py-3 bg-navy-900 border-b border-sentinel-border sticky top-0 z-10">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-navy-700 text-sentinel-muted hover:text-sentinel-text transition-colors"
+          >
+            <Menu size={20} />
+          </button>
+          <span className="font-display font-bold text-base text-cyan-400 tracking-wide">SENTINEL</span>
+          {flagCount > 0 && (
+            <span className="ml-auto bg-red-500 text-white text-[10px] font-mono px-2 py-0.5 rounded-full">
+              {flagCount} flags
+            </span>
+          )}
+        </div>
+
+        <div className="p-4 lg:p-6 xl:p-8 animate-fade-in">
           <Outlet />
         </div>
       </main>

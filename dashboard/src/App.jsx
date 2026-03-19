@@ -5,6 +5,7 @@ import Layout from './components/common/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Employees from './pages/Employees'
+import EmployeeDetail from './pages/EmployeeDetail'
 import Sessions from './pages/Sessions'
 import Flags from './pages/Flags'
 import Analytics from './pages/Analytics'
@@ -29,15 +30,16 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<Navigate to="/dashboard" replace />} />
-        <Route path="dashboard"  element={<Dashboard />} />
-        <Route path="employees"  element={<Employees />} />
-        <Route path="sessions"   element={<Sessions />} />
-        <Route path="flags"      element={<Flags />} />
-        <Route path="analytics"  element={<Analytics />} />
-        <Route path="leaves"     element={<Leaves />} />
-        <Route path="appeals"    element={<Appeals />} />
-        <Route path="audit"      element={<AuditLog />} />
-        <Route path="settings"   element={<Settings />} />
+        <Route path="dashboard"          element={<Dashboard />} />
+        <Route path="employees"          element={<Employees />} />
+        <Route path="employees/:id"      element={<EmployeeDetail />} />
+        <Route path="sessions"           element={<Sessions />} />
+        <Route path="flags"              element={<Flags />} />
+        <Route path="analytics"          element={<Analytics />} />
+        <Route path="leaves"             element={<Leaves />} />
+        <Route path="appeals"            element={<Appeals />} />
+        <Route path="audit"              element={<AuditLog />} />
+        <Route path="settings"           element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>

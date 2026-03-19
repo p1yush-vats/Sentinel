@@ -1,18 +1,31 @@
 import { format, formatDistanceToNow, parseISO } from 'date-fns'
 
+// Ensure the ISO string is treated as UTC even if it has no timezone suffix.
+// Supabase / SQLAlchemy returns "2026-03-19T08:30:00" (no Z) for
+// "timestamp without time zone" columns — browsers interpret that as LOCAL
+// time, which is wrong. Appending Z forces UTC interpretation.
+function toUTC(iso) {
+  if (!iso) return iso
+  // Already has timezone info (+05:30, Z, etc.) — leave it alone
+  if (iso.includes('Z') || iso.includes('+') || (iso.includes('-') && iso.lastIndexOf('-') > 7)) {
+    return iso
+  }
+  return iso + 'Z'
+}
+
 export const fmt = (iso) => {
   if (!iso) return '—'
-  try { return format(parseISO(iso), 'MMM d, yyyy HH:mm') } catch { return iso }
+  try { return format(parseISO(toUTC(iso)), 'MMM d, yyyy HH:mm') } catch { return iso }
 }
 
 export const fmtDate = (iso) => {
   if (!iso) return '—'
-  try { return format(parseISO(iso), 'MMM d, yyyy') } catch { return iso }
+  try { return format(parseISO(toUTC(iso)), 'MMM d, yyyy') } catch { return iso }
 }
 
 export const fromNow = (iso) => {
   if (!iso) return '—'
-  try { return formatDistanceToNow(parseISO(iso), { addSuffix: true }) } catch { return iso }
+  try { return formatDistanceToNow(parseISO(toUTC(iso)), { addSuffix: true }) } catch { return iso }
 }
 
 export const fmtMins = (mins) => {

@@ -1,7 +1,7 @@
 import { riskColor, initials, fromNow } from '../../utils/helpers'
 import { AlertTriangle } from 'lucide-react'
 
-export default function TopFlagged({ employees = [], loading }) {
+export default function TopFlagged({ employees = [], loading, onEmployeeClick }) {
   return (
     <div className="card p-5">
       <div className="flex items-center justify-between mb-4">
@@ -20,18 +20,24 @@ export default function TopFlagged({ employees = [], loading }) {
           </div>
         ))
       ) : employees.length === 0 ? (
-        <p className="text-sentinel-muted text-sm font-mono text-center py-6">No flagged employees</p>
+        <p className="text-sentinel-muted text-sm font-mono text-center py-6">No high-risk employees</p>
       ) : (
         employees.slice(0, 5).map((emp, i) => (
-          <div key={emp.id} className={`flex items-center gap-3 py-2.5 border-b border-sentinel-border/30 last:border-0 animate-fade-in stagger-${i+1}`}>
+          <div
+            key={emp.id}
+            onClick={() => onEmployeeClick?.(emp.id)}
+            className={`flex items-center gap-3 py-2.5 border-b border-sentinel-border/30 last:border-0
+              ${onEmployeeClick ? 'cursor-pointer hover:bg-navy-700/30 -mx-2 px-2 rounded-lg transition-colors' : ''}
+              animate-fade-in stagger-${i+1}`}
+          >
             <div className="w-8 h-8 rounded-full bg-red-400/10 border border-red-400/20 flex items-center justify-center text-xs font-mono text-red-400 font-bold shrink-0">
               {initials(emp.full_name)}
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm text-sentinel-text truncate">{emp.full_name}</p>
-              <p className="text-[11px] font-mono text-sentinel-muted">{emp.department}</p>
+              <p className="text-[11px] font-mono text-sentinel-muted">{emp.department || '—'}</p>
             </div>
-            <span className={`font-mono font-bold text-sm ${riskColor(emp.risk_score)}`}>
+            <span className={`font-mono font-bold text-sm shrink-0 ${riskColor(emp.risk_score)}`}>
               {Math.round(emp.risk_score || 0)}
             </span>
           </div>

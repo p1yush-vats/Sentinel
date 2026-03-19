@@ -117,3 +117,125 @@
 .stagger-3 { animation-delay: 0.15s; }
 .stagger-4 { animation-delay: 0.20s; }
 .stagger-5 { animation-delay: 0.25s; }
+/* ═══════════════════════════════════════════════════
+   REACT-BITS: SpotlightCard
+   ═══════════════════════════════════════════════════ */
+.spotlight-card {
+  position: relative;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.spotlight-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    600px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+    var(--spotlight-color, rgba(34,211,238,0.10)),
+    transparent 70%
+  );
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+  z-index: 1;
+  border-radius: inherit;
+}
+
+.spotlight-card:hover::before {
+  opacity: 1;
+}
+
+.spotlight-card > * {
+  position: relative;
+  z-index: 2;
+}
+
+/* ═══════════════════════════════════════════════════
+   REACT-BITS: BorderGlow
+   ═══════════════════════════════════════════════════ */
+.border-glow-card {
+  position: relative;
+  border-radius: var(--border-radius, 0.75rem);
+  background: transparent;
+  isolation: isolate;
+}
+
+.border-glow-card::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: calc(var(--border-radius, 0.75rem) + 1px);
+  background: radial-gradient(
+    180px circle at var(--glow-x, 50%) var(--glow-y, 50%),
+    var(--glow-color, #22d3ee),
+    transparent 70%
+  );
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.border-glow-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--border-radius, 0.75rem);
+  background: #0f1f38;
+  z-index: -1;
+}
+
+.border-glow-card:hover::before {
+  opacity: 1;
+}
+
+/* ═══════════════════════════════════════════════════
+   TiltCard — 3D tilt on hover
+   ═══════════════════════════════════════════════════ */
+.tilt-card {
+  transform-style: preserve-3d;
+  transition: transform 0.15s ease;
+  cursor: pointer;
+}
+
+/* ═══════════════════════════════════════════════════
+   Employee detail page extras
+   ═══════════════════════════════════════════════════ */
+.stat-ring {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+
+.shimmer-text {
+  background: linear-gradient(
+    90deg,
+    #22d3ee 0%,
+    #ffffff 40%,
+    #22d3ee 60%,
+    #0ea5e9 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 4s linear infinite;
+}
+
+@keyframes pulse-ring {
+  0%   { transform: scale(0.95); opacity: 0.7; }
+  50%  { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.7; }
+}
+
+.pulse-ring {
+  animation: pulse-ring 2s ease-in-out infinite;
+}

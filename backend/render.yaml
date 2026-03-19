@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: sentinel-backend
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        value: postgresql+asyncpg://postgres.jjobzfiwznmascgzvazn:IrgMUYbjfIXxvy7D@aws-0-ap-south-1.pooler.supabase.com:6543/postgres
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: false

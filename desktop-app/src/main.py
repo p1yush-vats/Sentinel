@@ -732,6 +732,28 @@ class SentinelApp:
                 else:
                     print("  ✅ No abnormalities detected")
 
+                # ── Sync session state to backend every cycle ──────────
+                # Runs in a background thread so it never blocks the UI
+                # or the detection loop. Pushes accurate work_minutes,
+                # break_minutes, lunch_taken so the dashboard stays live.
+                if self.session_manager.backend_session_id:
+                    def _do_sync():
+                        try:
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            success = loop.run_until_complete(
+                                self.session_manager.sync_session_state()
+                            )
+                            loop.close()
+                            if success:
+                                print(f"  📡 Session state synced to backend")
+                            else:
+                                print(f"  ⚠️ Session sync skipped (offline or no session)")
+                        except Exception as e:
+                            print(f"  ⚠️ Session sync error: {e}")
+
+                    threading.Thread(target=_do_sync, daemon=True).start()
+
                 if self.sync_client:
                     sync_status = self.sync_client.get_sync_status()
                     if sync_status.get('total_pending', 0) > 0:
@@ -745,7 +767,6 @@ class SentinelApp:
             time.sleep(detection_interval)
 
         print("⏹️ Detection loop stopped")
-
     # ============================================
     # CALLBACKS & EVENT HANDLERS
     # ============================================

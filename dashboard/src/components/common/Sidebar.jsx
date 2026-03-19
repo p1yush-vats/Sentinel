@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import {
   LayoutDashboard, Users, Clock, AlertTriangle, BarChart3,
-  Calendar, MessageSquare, ScrollText, Settings, LogOut, Shield
+  Calendar, MessageSquare, ScrollText, Settings, LogOut, Shield, X
 } from 'lucide-react'
 
 const NAV = [
@@ -17,18 +17,18 @@ const NAV = [
   { to: '/settings',  icon: Settings,        label: 'Settings' },
 ]
 
-export default function Sidebar({ flagCount = 0 }) {
+export default function Sidebar({ flagCount = 0, onClose }) {
   const { user, logout } = useAuthStore()
   const navigate = useNavigate()
 
   const handleLogout = () => { logout(); navigate('/login') }
 
   return (
-    <aside className="w-64 min-h-screen bg-navy-900 border-r border-sentinel-border flex flex-col shrink-0">
+    <aside className="w-64 h-full min-h-screen bg-navy-900 border-r border-sentinel-border flex flex-col">
       {/* Logo */}
-      <div className="px-6 py-5 border-b border-sentinel-border">
+      <div className="px-5 py-4 border-b border-sentinel-border flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-cyan-400/10 border border-cyan-400/30 flex items-center justify-center animate-glow">
+          <div className="w-8 h-8 rounded-lg bg-cyan-400/10 border border-cyan-400/30 flex items-center justify-center">
             <Shield size={16} className="text-cyan-400" />
           </div>
           <div>
@@ -36,6 +36,15 @@ export default function Sidebar({ flagCount = 0 }) {
             <p className="text-[10px] font-mono text-sentinel-muted tracking-widest uppercase">Admin Console</p>
           </div>
         </div>
+        {/* Close button — mobile only */}
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="lg:hidden w-7 h-7 rounded-lg hover:bg-navy-700 flex items-center justify-center text-sentinel-muted hover:text-sentinel-text transition-colors"
+          >
+            <X size={15} />
+          </button>
+        )}
       </div>
 
       {/* Nav */}
@@ -44,12 +53,13 @@ export default function Sidebar({ flagCount = 0 }) {
           <NavLink
             key={to}
             to={to}
+            onClick={onClose}
             className={({ isActive }) => isActive ? 'nav-item-active' : 'nav-item'}
           >
             <Icon size={16} />
-            <span className="flex-1">{label}</span>
+            <span className="flex-1 truncate">{label}</span>
             {badge && flagCount > 0 && (
-              <span className="bg-red-500 text-white text-[10px] font-mono px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+              <span className="bg-red-500 text-white text-[10px] font-mono px-1.5 py-0.5 rounded-full min-w-[18px] text-center shrink-0">
                 {flagCount > 99 ? '99+' : flagCount}
               </span>
             )}
@@ -58,14 +68,14 @@ export default function Sidebar({ flagCount = 0 }) {
       </nav>
 
       {/* User */}
-      <div className="p-4 border-t border-sentinel-border">
-        <div className="flex items-center gap-3 px-2 py-2 mb-2">
-          <div className="w-8 h-8 rounded-full bg-cyan-400/10 border border-cyan-400/20 flex items-center justify-center text-xs font-mono text-cyan-400 font-bold">
+      <div className="p-3 border-t border-sentinel-border shrink-0">
+        <div className="flex items-center gap-3 px-2 py-2 mb-1">
+          <div className="w-8 h-8 rounded-full bg-cyan-400/10 border border-cyan-400/20 flex items-center justify-center text-xs font-mono text-cyan-400 font-bold shrink-0">
             {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm text-sentinel-text truncate font-medium">{user?.full_name}</p>
-            <p className="text-[10px] font-mono text-sentinel-muted uppercase tracking-wider">{user?.role?.replace('_', ' ')}</p>
+            <p className="text-[10px] font-mono text-sentinel-muted uppercase tracking-wider truncate">{user?.role?.replace('_', ' ')}</p>
           </div>
         </div>
         <button

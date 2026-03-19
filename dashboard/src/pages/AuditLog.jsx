@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { auditAPI } from '../services/api'
 import { fmt, fromNow } from '../utils/helpers'
-import { ScrollText, RefreshCw } from 'lucide-react'
+import { ScrollText, RefreshCw, X } from 'lucide-react'
 
 const EVENT_COLORS = {
   user_login:           'text-emerald-400',
@@ -24,15 +24,20 @@ const EVENT_COLORS = {
   prefs_updated:        'text-slate-400',
 }
 
+// All known event types so filter isn't limited to what's in current page
+const ALL_EVENT_TYPES = Object.keys(EVENT_COLORS)
+
 export default function AuditLog() {
   const [logs,       setLogs]       = useState([])
   const [loading,    setLoading]    = useState(true)
-  const [eventType,  setEventType]  = useState('')
   const [refreshing, setRefreshing] = useState(false)
+  const [eventType,  setEventType]  = useState('')
+  const [dateFrom,   setDateFrom]   = useState('')
+  const [dateTo,     setDateTo]     = useState('')
 
   const load = (showRefresh = false) => {
     if (showRefresh) setRefreshing(true)
-    const params = { limit: 150 }
+    const params = { limit: 200 }
     if (eventType) params.event_type = eventType
     auditAPI.getAll(params)
       .then(r => setLogs(r.data?.logs || []))
@@ -42,14 +47,36 @@ export default function AuditLog() {
 
   useEffect(() => { load() }, [eventType])
 
-  const EVENT_TYPES = [...new Set(logs.map(l => l.event_type))]
+  const clearFilters = () => {
+    setEventType('')
+    setDateFrom('')
+    setDateTo('')
+  }
+
+  const hasFilters = eventType || dateFrom || dateTo
+
+  // Client-side date filter (backend doesn't support date range on audit)
+  const filtered = logs.filter(l => {
+    if (!l.created_at) return true
+    const d = new Date(l.created_at.includes('Z') || l.created_at.includes('+') ? l.created_at : l.created_at + 'Z')
+    if (dateFrom) {
+      const from = new Date(dateFrom)
+      if (d < from) return false
+    }
+    if (dateTo) {
+      const to = new Date(dateTo)
+      to.setDate(to.getDate() + 1)
+      if (d > to) return false
+    }
+    return true
+  })
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between animate-fade-in">
         <div>
           <h1 className="font-display font-bold text-2xl text-sentinel-text">Audit Log</h1>
-          <p className="text-sentinel-muted text-sm font-mono mt-1">{logs.length} entries</p>
+          <p className="text-sentinel-muted text-sm font-mono mt-1">{filtered.length} entries</p>
         </div>
         <button onClick={() => load(true)} className="btn-ghost flex items-center gap-2">
           <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
@@ -59,11 +86,30 @@ export default function AuditLog() {
 
       <div className="glow-line" />
 
-      <div className="flex gap-3 flex-wrap animate-fade-in stagger-1">
-        <select value={eventType} onChange={e => setEventType(e.target.value)} className="input-field w-auto">
-          <option value="">All Events</option>
-          {EVENT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
-        </select>
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3 items-end animate-fade-in stagger-1">
+        <div>
+          <p className="label mb-1">Event Type</p>
+          <select value={eventType} onChange={e => setEventType(e.target.value)} className="input-field w-auto">
+            <option value="">All Events</option>
+            {ALL_EVENT_TYPES.map(t => (
+              <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <p className="label mb-1">From Date</p>
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input-field w-auto" />
+        </div>
+        <div>
+          <p className="label mb-1">To Date</p>
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="input-field w-auto" />
+        </div>
+        {hasFilters && (
+          <button onClick={clearFilters} className="btn-ghost flex items-center gap-1.5 text-xs mb-0.5">
+            <X size={12} /> Clear
+          </button>
+        )}
       </div>
 
       <div className="card overflow-hidden animate-fade-in stagger-2">
@@ -87,7 +133,13 @@ export default function AuditLog() {
                     </td>
                   </tr>
                 ))
-              ) : logs.map((log, i) => (
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-5 py-12 text-center">
+                    <p className="text-sentinel-muted font-mono text-sm">No events match your filters</p>
+                  </td>
+                </tr>
+              ) : filtered.map((log, i) => (
                 <tr key={log.id} className={`table-row animate-fade-in stagger-${Math.min(i % 5 + 1, 5)}`}>
                   <td className="px-5 py-3">
                     <span className={`text-xs font-mono ${EVENT_COLORS[log.event_type] || 'text-sentinel-muted'}`}>
@@ -98,13 +150,17 @@ export default function AuditLog() {
                     <span className="text-xs font-mono text-sentinel-text">{log.action?.replace(/_/g, ' ')}</span>
                   </td>
                   <td className="px-5 py-3 hidden md:table-cell">
-                    <span className="text-xs font-mono text-sentinel-muted">{log.actor_id?.slice(0, 8) || '—'}…</span>
+                    <span className="text-xs font-mono text-sentinel-muted">
+                      {log.actor_id ? `${log.actor_id.slice(0, 8)}…` : '—'}
+                    </span>
                   </td>
                   <td className="px-5 py-3 hidden lg:table-cell">
                     <span className="text-xs font-mono text-sentinel-muted">{log.target_type || '—'}</span>
                   </td>
                   <td className="px-5 py-3">
-                    <span className="text-xs font-mono text-sentinel-muted" title={fmt(log.created_at)}>{fromNow(log.created_at)}</span>
+                    <span className="text-xs font-mono text-sentinel-muted" title={fmt(log.created_at)}>
+                      {fromNow(log.created_at)}
+                    </span>
                   </td>
                 </tr>
               ))}
