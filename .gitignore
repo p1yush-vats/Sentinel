@@ -3,7 +3,7 @@ venv/
 backend/venv/
 desktop-app/venv/
 # environment variables
-
+desktop-app/dist/
 
 # python cache
 __pycache__/
