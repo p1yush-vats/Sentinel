@@ -9,6 +9,19 @@ import threading
 import time
 import httpx
 
+# ── Windows taskbar icon fix ──────────────────────────────────
+# Must run before ANY tkinter/customtkinter import.
+# Without this, Windows shows the default Python icon in the taskbar
+# even if iconbitmap() is called later.
+import ctypes
+try:
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+        "sentinel.desktop.app.1.0"
+    )
+except Exception:
+    pass
+# ─────────────────────────────────────────────────────────────
+
 sys.path.insert(0, str(Path(__file__).parent))
 
 from ui.login_window import LoginWindow
@@ -25,6 +38,19 @@ from detection.abnormality_aggregator import AbnormalityAggregator
 import customtkinter as ctk
 
 IST = pytz.timezone('Asia/Kolkata')
+
+
+def _asset(filename: str) -> Path:
+    return Path(__file__).parent.parent / "assets" / "iso" / filename
+
+
+def _set_icon(window) -> None:
+    ico_path = _asset("sentinel.ico")
+    if ico_path.exists():
+        try:
+            window.iconbitmap(str(ico_path))
+        except Exception:
+            pass
 
 
 def now_ist():
@@ -69,12 +95,10 @@ class SentinelApp:
 
         self.current_session_id: Optional[str] = None
 
-        # Work log segment tracking (NEW)
         self._work_segment_start:  Optional[datetime] = None
         self._break_segment_start: Optional[datetime] = None
         self._lunch_segment_start: Optional[datetime] = None
 
-        # Hourly productivity metrics accumulator (NEW)
         self._hourly_metrics: dict = {}
 
         self.detection_task    = None
@@ -173,6 +197,8 @@ class SentinelApp:
         dialog.attributes('-topmost', True)
         dialog.focus_force()
 
+        _set_icon(dialog)
+
         container = ctk.CTkFrame(dialog, fg_color="#1E293B")
         container.pack(fill="both", expand=True, padx=30, pady=30)
 
@@ -212,7 +238,7 @@ class SentinelApp:
 
         ctk.CTkButton(
             button_frame,
-            text="▶️ Continue Session",
+            text="Continue Session",
             command=continue_session,
             height=50,
             font=("Arial", 14, "bold"),
@@ -234,7 +260,7 @@ class SentinelApp:
 
         ctk.CTkButton(
             button_frame,
-            text="🆕 Start Fresh",
+            text="Start Fresh",
             command=start_fresh,
             height=50,
             font=("Arial", 14, "bold"),
@@ -293,7 +319,6 @@ class SentinelApp:
         self.sync_client        = None
 
         print("✓ Logged out successfully")
-
         self.show_login()
 
     def initialize_session_components(self):
@@ -354,7 +379,7 @@ class SentinelApp:
         self.main_window.mainloop()
 
     # ============================================
-    # WORK LOG + PRODUCTIVITY HELPERS (NEW)
+    # WORK LOG + PRODUCTIVITY HELPERS
     # ============================================
 
     def _post_work_log(self, log_type: str, start: datetime, end: datetime, break_token_used: bool = False):
@@ -515,7 +540,7 @@ class SentinelApp:
 
             if self.main_window:
                 self.main_window.status_label.configure(
-                    text="⏳ Starting session...",
+                    text="Starting session...",
                     text_color="#F59E0B"
                 )
 
@@ -527,7 +552,6 @@ class SentinelApp:
             if result.get("conflict"):
                 existing = result.get("existing_session", {})
                 print(f"\n⚠️ Conflict: active session exists on backend")
-                print(f"   Session ID: {existing.get('id', 'unknown')[:8]}...")
                 self.show_session_conflict_dialog(existing)
                 return
 
@@ -541,7 +565,6 @@ class SentinelApp:
                     backend_session_id=result.get('backend_session_id')
                 )
                 print(f"\n✅ New session started: {self.current_session_id}")
-                print(f"   Backend session ID: {result.get('backend_session_id', 'offline')}")
             else:
                 print(f"\n▶️ Continuing session: {self.current_session_id}")
                 if result.get('backend_session_id'):
@@ -549,8 +572,6 @@ class SentinelApp:
                         session_id=self.current_session_id,
                         status='active'
                     )
-
-            print(f"   Backend synced: {result.get('synced', False)}")
 
             self._work_segment_start = now_ist()
             self._hourly_metrics     = {}
@@ -562,14 +583,11 @@ class SentinelApp:
             )
             print("  ✓ Abnormality aggregator initialized")
 
-            print("\n🔍 Starting abnormality detection...")
             self.start_detection()
-
-            print(f"   Detection active: {self.detection_running}")
 
             if self.main_window:
                 self.main_window.status_label.configure(
-                    text="✅ Session started - Detection active",
+                    text="Session started - Detection active",
                     text_color="#10B981"
                 )
 
@@ -669,11 +687,6 @@ class SentinelApp:
 
         print("🚀 Starting detection pipeline...")
         self.input_collector.start_collecting()
-        print("  ✓ Input collector started (privacy-safe mode)")
-        print("  ✓ Paste detection active (Windows API)")
-        print("  ✓ Clipboard size detection active")
-        print("  ✓ Idle detection active")
-        print("  ✓ Input collector started (hooks active)")
 
         self.detection_running = True
         self.detection_task = threading.Thread(
@@ -689,7 +702,6 @@ class SentinelApp:
         print("⏸️ Stopping detection...")
         self.detection_running = False
         self.input_collector.stop_collecting()
-        print("  ✓ Input collector stopped")
         print("  ✓ Detection stopped")
 
     def _detection_loop(self):
@@ -732,10 +744,10 @@ class SentinelApp:
                 else:
                     print("  ✅ No abnormalities detected")
 
-                # ── Sync session state to backend every cycle ──────────
-                # Runs in a background thread so it never blocks the UI
-                # or the detection loop. Pushes accurate work_minutes,
-                # break_minutes, lunch_taken so the dashboard stays live.
+                # ── Sync session state every 30s ──────────────────────
+                # Pushes accurate work/break/lunch minutes to backend
+                # so the dashboard shows live data without waiting for
+                # session end. Runs in background thread — never blocks UI.
                 if self.session_manager.backend_session_id:
                     def _do_sync():
                         try:
@@ -746,9 +758,9 @@ class SentinelApp:
                             )
                             loop.close()
                             if success:
-                                print(f"  📡 Session state synced to backend")
+                                print(f"  📡 Session synced to backend")
                             else:
-                                print(f"  ⚠️ Session sync skipped (offline or no session)")
+                                print(f"  ⚠️ Session sync skipped")
                         except Exception as e:
                             print(f"  ⚠️ Session sync error: {e}")
 
@@ -767,8 +779,9 @@ class SentinelApp:
             time.sleep(detection_interval)
 
         print("⏹️ Detection loop stopped")
+
     # ============================================
-    # CALLBACKS & EVENT HANDLERS
+    # CALLBACKS
     # ============================================
 
     def on_session_state_change(self, state, data):
@@ -788,9 +801,7 @@ class SentinelApp:
         confidence   = pattern.get('confidence', 0)
         details      = pattern.get('details', 'N/A')
 
-        print(f"🔍 Pattern detected: {pattern_type}")
-        print(f"   Confidence: {confidence:.0%}")
-        print(f"   Details: {details}")
+        print(f"🔍 Pattern detected: {pattern_type} ({confidence:.0%}) — {details}")
 
         pattern_to_abnormality = {
             'large_paste':      'suspicious_paste',
@@ -813,8 +824,6 @@ class SentinelApp:
                     timestamp=datetime.now(),
                     description=details
                 )
-            else:
-                print(f"  ⚠️ Aggregator not initialized, skipping")
 
         if self.main_window:
             self.main_window.after(0, lambda: self.main_window.status_label.configure(
@@ -828,10 +837,7 @@ class SentinelApp:
             if hasattr(abnormality.abnormality_type, 'value')
             else str(abnormality.abnormality_type)
         )
-        print(f"\n🚨 ABNORMALITY DETECTED!")
-        print(f"   Type: {abn_label}")
-        print(f"   Confidence: {abnormality.confidence_score:.2%}")
-        print(f"   Description: {abnormality.metadata.get('description', 'N/A')}")
+        print(f"\n🚨 ABNORMALITY: {abn_label} ({abnormality.confidence_score:.2%})")
 
         if self.main_window:
             def update_ui():
@@ -845,7 +851,6 @@ class SentinelApp:
 
     def _save_abnormality_to_aggregator(self, abnormality: Abnormality):
         if not self.abnormality_aggregator:
-            print(f"  ⚠️ Aggregator not initialized, skipping save")
             return
 
         abn_type = (
@@ -861,7 +866,7 @@ class SentinelApp:
         )
 
     # ============================================
-    # UTILITY / DIALOGS
+    # CONFLICT DIALOG
     # ============================================
 
     def show_session_conflict_dialog(self, existing_session: dict):
@@ -878,6 +883,8 @@ class SentinelApp:
         dialog.transient(self.main_window)
         dialog.grab_set()
 
+        _set_icon(dialog)
+
         container = ctk.CTkFrame(dialog, fg_color="#1E293B")
         container.pack(fill="both", expand=True, padx=30, pady=30)
 
@@ -889,20 +896,17 @@ class SentinelApp:
         ).pack(pady=(0, 20))
 
         start_time = existing_session.get('start_time', '')
-        if start_time:
-            try:
-                start_dt       = parse_datetime_ist(start_time)
-                start_time_str = start_dt.strftime('%I:%M %p on %B %d')
-            except Exception:
-                start_time_str = start_time
-        else:
-            start_time_str = "Unknown time"
+        try:
+            start_dt       = parse_datetime_ist(start_time)
+            start_time_str = start_dt.strftime('%I:%M %p on %B %d')
+        except Exception:
+            start_time_str = start_time or "Unknown time"
 
         ctk.CTkLabel(
             container,
-            text=f"You have an active session that started at:\n\n{start_time_str}\n\n"
-                 f"Work time: {existing_session.get('total_work_minutes', 0)} minutes\n"
-                 f"Break time: {existing_session.get('total_break_minutes', 0)} minutes",
+            text=f"Active session started at:\n\n{start_time_str}\n\n"
+                 f"Work: {existing_session.get('total_work_minutes', 0)} min  "
+                 f"Break: {existing_session.get('total_break_minutes', 0)} min",
             font=("Arial", 12),
             text_color="#94A3B8",
             justify="center"
@@ -933,19 +937,13 @@ class SentinelApp:
                 self._work_segment_start = now_ist()
                 self.start_detection()
 
-                print(f"▶️ Continuing existing session: {existing_backend_id}")
                 if self.main_window:
                     self.main_window.status_label.configure(
-                        text="✅ Continuing existing session",
+                        text="Continuing existing session",
                         text_color="#10B981"
                     )
             except Exception as e:
                 print(f"❌ Failed to continue session: {e}")
-                if self.main_window:
-                    self.main_window.status_label.configure(
-                        text=f"Failed to continue session: {str(e)}",
-                        text_color="#EF4444"
-                    )
 
         ctk.CTkButton(
             button_frame,
@@ -965,12 +963,10 @@ class SentinelApp:
                 old_backend_id = old_local.get('backend_session_id') if old_local else None
 
                 if old_backend_id:
-                    print(f"🗑️ Deleting backend session {old_backend_id[:8]}...")
                     self.sync_client.delete_session_now(old_backend_id)
 
                 if self.current_session_id:
                     self.local_db.delete_session(self.current_session_id)
-                    print(f"🗑️ Cleared local session {self.current_session_id[:8]}...")
 
                 self.session_manager.time_engine.state              = SessionState.IDLE
                 self.session_manager.time_engine.session_start_time = None
@@ -1001,27 +997,17 @@ class SentinelApp:
                     self._work_segment_start = now_ist()
                     self._hourly_metrics     = {}
                     self.start_detection()
-                    print(f"\n✅ New session started: {self.current_session_id}")
+
                     if self.main_window:
                         self.main_window.status_label.configure(
-                            text="New session started successfully",
+                            text="New session started",
                             text_color="#10B981"
-                        )
-                else:
-                    print("❌ Still got conflict after force_end")
-                    if self.main_window:
-                        self.main_window.status_label.configure(
-                            text="Could not start session — please try again",
-                            text_color="#EF4444"
                         )
 
             except Exception as e:
                 print(f"❌ Failed to start new session: {e}")
                 import traceback
                 traceback.print_exc()
-                if self.main_window:
-                    self.main_window.status_label.configure(
-                        text=f"Failed: {str(e)}", text_color="#EF4444")
 
         ctk.CTkButton(
             button_frame,
