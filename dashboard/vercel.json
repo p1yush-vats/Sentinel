@@ -1,8 +1,8 @@
 {
   "rewrites": [
     {
-      "source": "/api/:path*",
-      "destination": "https://sentinel-ofye.onrender.com/api/:path*"
+      "source": "/api/v1/:path*",
+      "destination": "https://sentinel-ofye.onrender.com/api/v1/:path*"
     }
   ]
 }
