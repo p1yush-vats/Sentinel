@@ -21,7 +21,7 @@ export const useAuthStore = create(
           api.defaults.headers.common['Authorization'] = `Bearer ${access_token}`
 
           // Token expires in 24 hours
-          const expiresAt = Date.now() + 24 * 60 * 60 * 1000
+          const expiresAt = Date.now() + 8 * 60 * 60 * 1000
 
           set({ user, token: access_token, expiresAt, isLoading: false })
           return true
