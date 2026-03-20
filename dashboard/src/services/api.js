@@ -1,10 +1,6 @@
 import axios from 'axios'
 
-const api = axios.create({ 
-  baseURL: 'https://sentinel-ofye.onrender.com/api/v1', 
-  timeout: 15000 
-})
-
+const api = axios.create({ baseURL: '/api/v1', timeout: 15000 })
 api.interceptors.response.use(
   (r) => r,
   (err) => {

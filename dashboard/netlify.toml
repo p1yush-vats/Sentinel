@@ -1,0 +1,5 @@
+[[redirects]]
+  from = "/api/*"
+  to = "https://sentinel-ofye.onrender.com/api/:splat"
+  status = 200
+  force = true
