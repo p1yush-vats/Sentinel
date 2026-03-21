@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import Sidebar from './Sidebar'
 import { flagsAPI } from '../../services/api'
 import { Menu } from 'lucide-react'
+import senLogo from '../../img/sen.png'
 
 export default function Layout() {
   const [flagCount,   setFlagCount]   = useState(0)
@@ -34,7 +35,7 @@ export default function Layout() {
         />
       )}
 
-      {/* Sidebar — fixed height, never scrolls with page */}
+      {/* Sidebar */}
       <div className={`
         fixed inset-y-0 left-0 z-30 w-64 transform transition-transform duration-300 ease-in-out
         lg:static lg:translate-x-0 lg:z-auto lg:flex-shrink-0
@@ -43,7 +44,7 @@ export default function Layout() {
         <Sidebar flagCount={flagCount} onClose={() => setSidebarOpen(false)} />
       </div>
 
-      {/* Main content — scrolls independently */}
+      {/* Main content */}
       <main style={{ flex: 1, overflowY: 'auto', minWidth: 0 }}>
 
         {/* Mobile top bar */}
@@ -54,7 +55,18 @@ export default function Layout() {
           >
             <Menu size={20} />
           </button>
-          <span className="font-display font-bold text-base text-cyan-400 tracking-wide">SENTINEL</span>
+
+          {/* sen.png logo + wordmark */}
+          <div className="flex items-center gap-2">
+            <img
+              src={senLogo}
+              alt="Sentinel"
+              className="w-6 h-6 rounded-md object-contain"
+              style={{ background: 'rgba(34,211,238,0.08)', border: '1px solid rgba(34,211,238,0.2)', padding: 1 }}
+            />
+            <span className="font-display font-bold text-base text-cyan-400 tracking-wide">SENTINEL</span>
+          </div>
+
           {flagCount > 0 && (
             <span className="ml-auto bg-red-500 text-white text-[10px] font-mono px-2 py-0.5 rounded-full">
               {flagCount} flags

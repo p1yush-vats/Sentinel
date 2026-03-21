@@ -2,9 +2,10 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import {
   LayoutDashboard, Users, Clock, AlertTriangle, BarChart3,
-  Calendar, MessageSquare, ScrollText, Settings, LogOut, Shield, X,
+  Calendar, MessageSquare, ScrollText, Settings, LogOut, X,
   ArrowLeftRight
 } from 'lucide-react'
+import senLogo from '../../img/sen.png'
 
 const NAV = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -29,9 +30,12 @@ export default function Sidebar({ flagCount = 0, onClose }) {
       {/* Logo */}
       <div className="px-5 py-4 border-b border-sentinel-border flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-cyan-400/10 border border-cyan-400/30 flex items-center justify-center">
-            <Shield size={16} className="text-cyan-400" />
-          </div>
+          <img
+            src={senLogo}
+            alt="Sentinel"
+            className="w-8 h-8 rounded-lg object-contain"
+            style={{ background: 'rgba(34,211,238,0.08)', border: '1px solid rgba(34,211,238,0.25)', padding: 2 }}
+          />
           <div>
             <span className="font-display font-bold text-base text-sentinel-text tracking-wide">SENTINEL</span>
             <p className="text-[10px] font-mono text-sentinel-muted tracking-widest uppercase">Admin Console</p>
