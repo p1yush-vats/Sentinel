@@ -3,12 +3,19 @@ import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { Search, UserPlus, UserCheck, UserX, X, Upload, Camera } from 'lucide-react'
 import { employeesAPI } from '../services/api'
-import { initials, deptColor, riskBadge, fmtDate } from '../utils/helpers'
+import { initials, deptColor, deptStyle, riskBadge, fmtDate } from '../utils/helpers'
 import toast from 'react-hot-toast'
 
-const DEPARTMENTS = ['Engineering', 'Sales', 'Marketing', 'Finance', 'HR', 'Operations', 'Administration']
-const ROLES       = ['employee', 'admin']
+// ── Keep in sync with helpers.js DEPT_COLORS ─────────────────────────────────
+const DEPARTMENTS = [
+  'Engineering', 'Sales', 'Marketing', 'Finance',
+  'HR', 'IT', 'Administration', 'Operations',
+  'Legal', 'Design', 'Product', 'Support',
+  'Logistics', 'Procurement', 'Security', 'Research',
+]
+const ROLES = ['employee', 'admin']
 
+// ─── Avatar ───────────────────────────────────────────────────────────────────
 function Avatar({ employee, size = 'md' }) {
   const sizes = { sm: 'w-8 h-8 text-xs', md: 'w-10 h-10 text-sm', lg: 'w-16 h-16 text-xl' }
   const color = deptColor(employee.department)
@@ -35,6 +42,20 @@ function Avatar({ employee, size = 'md' }) {
   )
 }
 
+// ─── Department badge ─────────────────────────────────────────────────────────
+function DeptBadge({ dept }) {
+  if (!dept) return <span className="text-sentinel-muted font-mono text-xs">—</span>
+  return (
+    <span
+      className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full"
+      style={deptStyle(dept)}
+    >
+      {dept}
+    </span>
+  )
+}
+
+// ─── Register modal ───────────────────────────────────────────────────────────
 function RegisterModal({ onClose, onSuccess }) {
   const [form, setForm] = useState({
     full_name: '', email: '', password: '', department: 'Engineering',
@@ -45,7 +66,6 @@ function RegisterModal({ onClose, onSuccess }) {
   const [errors,   setErrors]   = useState({})
   const fileRef = useRef()
 
-  // Prevent body scroll when modal is open
   useEffect(() => {
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = '' }
@@ -58,17 +78,14 @@ function RegisterModal({ onClose, onSuccess }) {
     if (!file) return
     if (file.size > 2 * 1024 * 1024) { toast.error('Image must be under 2MB'); return }
     const reader = new FileReader()
-    reader.onload = () => {
-      setPreview(reader.result)
-      set('avatar_url', reader.result)
-    }
+    reader.onload = () => { setPreview(reader.result); set('avatar_url', reader.result) }
     reader.readAsDataURL(file)
   }
 
   const validate = () => {
     const e = {}
-    if (!form.full_name.trim())  e.full_name = 'Required'
-    if (!form.email.trim())      e.email     = 'Required'
+    if (!form.full_name.trim()) e.full_name = 'Required'
+    if (!form.email.trim())     e.email     = 'Required'
     if (!form.password || form.password.length < 6) e.password = 'Min 6 characters'
     setErrors(e)
     return Object.keys(e).length === 0
@@ -91,21 +108,12 @@ function RegisterModal({ onClose, onSuccess }) {
   }
 
   return createPortal(
-    /* Full-screen fixed overlay — rendered directly on document.body,
-       bypasses sidebar transform stacking context completely */
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-    >
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        onClick={onClose}
-      />
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
 
-      {/* Modal panel — scrolls internally on small screens */}
       <div className="relative w-full max-w-2xl bg-navy-800 border border-sentinel-border rounded-2xl shadow-2xl flex flex-col max-h-[92vh] animate-fade-in">
 
-        {/* Sticky header */}
+        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-sentinel-border shrink-0">
           <div>
             <h2 className="font-display font-bold text-lg text-sentinel-text">Register Employee</h2>
@@ -119,7 +127,7 @@ function RegisterModal({ onClose, onSuccess }) {
           </button>
         </div>
 
-        {/* Scrollable body */}
+        {/* Body */}
         <div className="overflow-y-auto flex-1 px-6 py-5">
           {/* Avatar upload */}
           <div className="flex items-center gap-5 mb-6">
@@ -201,12 +209,22 @@ function RegisterModal({ onClose, onSuccess }) {
                 {errors.password && <p className="text-red-400 text-xs font-mono mt-1">{errors.password}</p>}
               </div>
 
-              {/* Department */}
+              {/* Department — shows colour swatch next to selected dept */}
               <div>
                 <label className="label mb-1.5 block">Department</label>
-                <select value={form.department} onChange={e => set('department', e.target.value)} className="input-field">
-                  {DEPARTMENTS.map(d => <option key={d}>{d}</option>)}
-                </select>
+                <div className="relative">
+                  <span
+                    className="absolute left-3 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full pointer-events-none"
+                    style={{ background: deptColor(form.department) }}
+                  />
+                  <select
+                    value={form.department}
+                    onChange={e => set('department', e.target.value)}
+                    className="input-field pl-8"
+                  >
+                    {DEPARTMENTS.map(d => <option key={d}>{d}</option>)}
+                  </select>
+                </div>
               </div>
 
               {/* Role */}
@@ -255,11 +273,9 @@ function RegisterModal({ onClose, onSuccess }) {
           </form>
         </div>
 
-        {/* Sticky footer with buttons */}
+        {/* Footer */}
         <div className="flex gap-3 px-6 py-4 border-t border-sentinel-border shrink-0">
-          <button type="button" onClick={onClose} className="btn-ghost flex-1">
-            Cancel
-          </button>
+          <button type="button" onClick={onClose} className="btn-ghost flex-1">Cancel</button>
           <button
             type="submit"
             form="register-form"
@@ -272,9 +288,7 @@ function RegisterModal({ onClose, onSuccess }) {
                 Registering...
               </>
             ) : (
-              <>
-                <UserPlus size={14} /> Register Employee
-              </>
+              <><UserPlus size={14} /> Register Employee</>
             )}
           </button>
         </div>
@@ -284,6 +298,7 @@ function RegisterModal({ onClose, onSuccess }) {
   )
 }
 
+// ─── Employee card ────────────────────────────────────────────────────────────
 function EmployeeCard({ employee, onToggleActive }) {
   const color = deptColor(employee.department)
   const navigate = useNavigate()
@@ -293,7 +308,9 @@ function EmployeeCard({ employee, onToggleActive }) {
       onClick={() => navigate(`/employees/${employee.id}`)}
       className="card overflow-hidden transition-all duration-300 hover:border-cyan-400/25 hover:shadow-glow-cyan cursor-pointer animate-fade-in group"
     >
-      <div className="h-1 w-full transition-all duration-300" style={{ backgroundColor: color + '60' }} />
+      {/* Top colour bar — full dept colour, not semi-transparent */}
+      <div className="h-1 w-full" style={{ backgroundColor: color }} />
+
       <div className="p-5">
         <div className="flex items-center gap-3 mb-4">
           <Avatar employee={employee} size="md" />
@@ -301,9 +318,16 @@ function EmployeeCard({ employee, onToggleActive }) {
             <p className="font-semibold text-sentinel-text text-sm leading-tight truncate group-hover:text-cyan-300 transition-colors">
               {employee.full_name}
             </p>
-            <p className="text-xs font-mono mt-0.5 truncate" style={{ color }}>
-              {employee.position || employee.department || '—'}
-            </p>
+            {/* Position in dept colour; fallback to DeptBadge if no position */}
+            {employee.position ? (
+              <p className="text-xs font-mono mt-0.5 truncate" style={{ color }}>
+                {employee.position}
+              </p>
+            ) : (
+              <div className="mt-1">
+                <DeptBadge dept={employee.department} />
+              </div>
+            )}
           </div>
           <span className={`shrink-0 ${employee.is_active ? 'badge-low' : 'badge-critical'}`}>
             {employee.is_active ? 'Active' : 'Inactive'}
@@ -312,7 +336,7 @@ function EmployeeCard({ employee, onToggleActive }) {
 
         <div className="space-y-1.5 mb-4">
           <p className="text-xs font-mono text-sentinel-muted truncate">{employee.email}</p>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             {employee.phone         && <p className="text-xs font-mono text-sentinel-muted">{employee.phone}</p>}
             {employee.employee_code && <p className="text-xs font-mono text-sentinel-muted">#{employee.employee_code}</p>}
           </div>
@@ -323,7 +347,13 @@ function EmployeeCard({ employee, onToggleActive }) {
             <span className={riskBadge(employee.risk_score || 0)}>
               {Math.round(employee.risk_score || 0)}
             </span>
-            <span className="badge-ok capitalize text-[10px]">{employee.role}</span>
+            {/* Role badge coloured by dept */}
+            <span
+              className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full capitalize"
+              style={deptStyle(employee.department)}
+            >
+              {employee.role}
+            </span>
           </div>
           <button
             onClick={e => { e.stopPropagation(); onToggleActive(employee) }}
@@ -342,6 +372,7 @@ function EmployeeCard({ employee, onToggleActive }) {
   )
 }
 
+// ─── Main page ────────────────────────────────────────────────────────────────
 export default function Employees() {
   const [employees, setEmployees] = useState([])
   const [filtered,  setFiltered]  = useState([])
@@ -387,18 +418,12 @@ export default function Employees() {
     }
   }
 
-  const onRegisterSuccess = (newEmp) => {
-    setEmployees(prev => [newEmp, ...prev])
-  }
+  const onRegisterSuccess = (newEmp) => setEmployees(prev => [newEmp, ...prev])
 
   return (
     <div className="space-y-5">
-      {/* Modal rendered via portal-like z-50 fixed overlay */}
       {showModal && (
-        <RegisterModal
-          onClose={() => setShowModal(false)}
-          onSuccess={onRegisterSuccess}
-        />
+        <RegisterModal onClose={() => setShowModal(false)} onSuccess={onRegisterSuccess} />
       )}
 
       {/* Header */}
@@ -408,7 +433,9 @@ export default function Employees() {
           <p className="text-sentinel-muted text-sm font-mono mt-1">{filtered.length} of {employees.length} shown</p>
         </div>
         <button onClick={() => setShowModal(true)} className="btn-primary flex items-center gap-2">
-          <UserPlus size={15} /> <span className="hidden sm:inline">Register Employee</span><span className="sm:hidden">Add</span>
+          <UserPlus size={15} />
+          <span className="hidden sm:inline">Register Employee</span>
+          <span className="sm:hidden">Add</span>
         </button>
       </div>
 
@@ -425,11 +452,26 @@ export default function Employees() {
             className="input-field pl-9"
           />
         </div>
-        <select value={dept} onChange={e => setDept(e.target.value)} className="input-field w-auto">
-          {departments.map(d => (
-            <option key={d} value={d}>{d === 'all' ? 'All Departments' : d}</option>
-          ))}
-        </select>
+
+        {/* Department filter — coloured dot next to selected */}
+        <div className="relative">
+          {dept !== 'all' && (
+            <span
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full pointer-events-none z-10"
+              style={{ background: deptColor(dept) }}
+            />
+          )}
+          <select
+            value={dept}
+            onChange={e => setDept(e.target.value)}
+            className={`input-field w-auto ${dept !== 'all' ? 'pl-8' : ''}`}
+          >
+            {departments.map(d => (
+              <option key={d} value={d}>{d === 'all' ? 'All Departments' : d}</option>
+            ))}
+          </select>
+        </div>
+
         <div className="flex border border-sentinel-border rounded-lg overflow-hidden">
           {[['grid', '⊞'], ['list', '☰']].map(([v, icon]) => (
             <button key={v} onClick={() => setView(v)}
@@ -491,7 +533,7 @@ export default function Employees() {
                     </tr>
                   ))
                 ) : filtered.map(emp => (
-                  <tr key={emp.id} className="table-row">
+                  <tr key={emp.id} className="table-row cursor-pointer" onClick={() => navigate(`/employees/${emp.id}`)}>
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-3">
                         <Avatar employee={emp} size="sm" />
@@ -502,12 +544,10 @@ export default function Employees() {
                       </div>
                     </td>
                     <td className="px-5 py-3 hidden md:table-cell">
-                      <span className="text-sm font-mono" style={{ color: deptColor(emp.department) }}>
-                        {emp.department || '—'}
-                      </span>
+                      <DeptBadge dept={emp.department} />
                     </td>
                     <td className="px-5 py-3 hidden lg:table-cell">
-                      <span className="text-sm text-sentinel-muted">{emp.position || '—'}</span>
+                      <span className="text-sm text-sentinel-muted font-mono">{emp.position || '—'}</span>
                     </td>
                     <td className="px-5 py-3 hidden lg:table-cell">
                       <span className="text-sm font-mono text-sentinel-muted">{fmtDate(emp.created_at)}</span>
@@ -519,7 +559,7 @@ export default function Employees() {
                     </td>
                     <td className="px-5 py-3">
                       <button
-                        onClick={() => toggleActive(emp)}
+                        onClick={e => { e.stopPropagation(); toggleActive(emp) }}
                         className={`flex items-center gap-1 text-xs font-mono px-2.5 py-1 rounded-lg border transition-all
                           ${emp.is_active
                             ? 'border-red-500/20 text-red-400 hover:bg-red-400/10'

@@ -2,11 +2,11 @@ import { Outlet } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import Sidebar from './Sidebar'
 import { flagsAPI } from '../../services/api'
-import { Menu, X } from 'lucide-react'
+import { Menu } from 'lucide-react'
 
 export default function Layout() {
-  const [flagCount,    setFlagCount]    = useState(0)
-  const [sidebarOpen,  setSidebarOpen]  = useState(false)
+  const [flagCount,   setFlagCount]   = useState(0)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   useEffect(() => {
     const fetch = () => {
@@ -19,13 +19,12 @@ export default function Layout() {
     return () => clearInterval(interval)
   }, [])
 
-  // Close sidebar on route change (mobile)
   useEffect(() => {
     setSidebarOpen(false)
   }, [location.pathname])
 
   return (
-    <div className="flex min-h-screen bg-sentinel-bg grid-bg">
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }} className="bg-sentinel-bg grid-bg">
 
       {/* Mobile overlay */}
       {sidebarOpen && (
@@ -35,17 +34,18 @@ export default function Layout() {
         />
       )}
 
-      {/* Sidebar — fixed on mobile (slide in), static on desktop */}
+      {/* Sidebar — fixed height, never scrolls with page */}
       <div className={`
         fixed inset-y-0 left-0 z-30 w-64 transform transition-transform duration-300 ease-in-out
-        lg:static lg:translate-x-0 lg:z-auto
+        lg:static lg:translate-x-0 lg:z-auto lg:flex-shrink-0
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-      `}>
+      `} style={{ height: '100vh' }}>
         <Sidebar flagCount={flagCount} onClose={() => setSidebarOpen(false)} />
       </div>
 
-      {/* Main content */}
-      <main className="flex-1 min-w-0 overflow-auto">
+      {/* Main content — scrolls independently */}
+      <main style={{ flex: 1, overflowY: 'auto', minWidth: 0 }}>
+
         {/* Mobile top bar */}
         <div className="lg:hidden flex items-center gap-3 px-4 py-3 bg-navy-900 border-b border-sentinel-border sticky top-0 z-10">
           <button

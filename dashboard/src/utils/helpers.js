@@ -1,5 +1,6 @@
 import { format, formatDistanceToNow, parseISO } from 'date-fns'
 
+// ─── Date Helpers ─────────────────────────────────────────────────────────────
 // Ensure the ISO string is treated as UTC even if it has no timezone suffix.
 // Supabase / SQLAlchemy returns "2026-03-19T08:30:00" (no Z) for
 // "timestamp without time zone" columns — browsers interpret that as LOCAL
@@ -36,6 +37,9 @@ export const fmtMins = (mins) => {
   return m === 0 ? `${h}h` : `${h}h ${m}m`
 }
 
+
+// ─── Risk & Severity ──────────────────────────────────────────────────────────
+
 export const riskColor = (score) => {
   if (score >= 75) return 'text-red-400'
   if (score >= 50) return 'text-orange-400'
@@ -55,23 +59,54 @@ export const severityBadge = (s) => {
   return map[s] || 'badge-ok'
 }
 
+
+// ─── User ─────────────────────────────────────────────────────────────────────
+
 export const initials = (name) => {
   if (!name) return '??'
   return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
 }
 
-export const deptColor = (dept) => {
-  const map = {
-    Engineering:  '#22d3ee',
-    Sales:        '#10b981',
-    Marketing:    '#f59e0b',
-    Finance:      '#8b5cf6',
-    HR:           '#ec4899',
-    Operations:   '#f97316',
-    Administration: '#64748b',
-  }
-  return map[dept] || '#64748b'
+
+// ─── Department Colours ───────────────────────────────────────────────────────
+
+const DEPT_COLORS = {
+  // Departments from employee table
+  Engineering:    '#22d3ee',   // cyan
+  Sales:          '#10b981',   // emerald
+  Marketing:      '#f59e0b',   // amber
+  Finance:        '#8b5cf6',   // violet
+  HR:             '#ec4899',   // pink
+  IT:             '#3b82f6',   // blue
+  Administration: '#64748b',   // slate
+
+  // Extended / future departments
+  Operations:     '#f97316',   // orange
+  Legal:          '#a855f7',   // purple
+  Design:         '#e11d48',   // rose
+  Product:        '#0ea5e9',   // sky
+  Support:        '#14b8a6',   // teal
+  Logistics:      '#84cc16',   // lime
+  Procurement:    '#eab308',   // yellow
+  Security:       '#6366f1',   // indigo
+  Research:       '#06b6d4',   // light cyan
 }
+
+// Returns the solid hex colour for a department
+export const deptColor = (dept) => DEPT_COLORS[dept] || '#64748b'
+
+// Returns a low-opacity background (useful for badge/chip backgrounds)
+export const deptBg = (dept) => `${deptColor(dept)}22`
+
+// Returns a ready-to-spread inline style object { color, background, border }
+export const deptStyle = (dept) => ({
+  color:      deptColor(dept),
+  background: deptBg(dept),
+  border:     `1px solid ${deptColor(dept)}44`,
+})
+
+
+// ─── Status ───────────────────────────────────────────────────────────────────
 
 export const statusBadge = (status) => {
   const map = {

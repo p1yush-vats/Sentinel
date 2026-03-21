@@ -16,6 +16,7 @@ class EmployeeCreate(BaseModel):
     password:      str
     full_name:     str
     department:    Optional[str] = None
+    gender:        Optional[str] = None
     position:      Optional[str] = None
     phone:         Optional[str] = None
     employee_code: Optional[str] = None
@@ -29,6 +30,7 @@ class EmployeeUpdate(BaseModel):
     position:      Optional[str]  = None
     phone:         Optional[str]  = None
     employee_code: Optional[str]  = None
+    gender:        Optional[str]  = None
     avatar_url:    Optional[str]  = None
     role:          Optional[str]  = None
     is_active:     Optional[bool] = None
@@ -78,6 +80,7 @@ async def create_employee(
         password_hash = get_password_hash(data.password),
         full_name     = data.full_name,
         department    = data.department,
+        gender        = data.gender,
         position      = data.position,
         phone         = data.phone,
         employee_code = data.employee_code,

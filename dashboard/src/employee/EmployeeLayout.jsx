@@ -19,6 +19,7 @@ export default function EmployeeLayout() {
   const location = useLocation()
   const [themeOpen, setThemeOpen] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [avatarError, setAvatarError] = useState(false)
 
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin'
 
@@ -67,6 +68,14 @@ export default function EmployeeLayout() {
       fontWeight: '900',
       letterSpacing: '-1px',
       marginBottom: '10px',
+      overflow: 'hidden',
+      flexShrink: 0,
+    },
+    avatarImg: {
+      width: '100%',
+      height: '100%',
+      objectFit: 'cover',
+      display: 'block',
     },
     userName: {
       fontSize: '13px',
@@ -176,7 +185,9 @@ export default function EmployeeLayout() {
     },
   }
 
-  const initials = (name) => name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0,2) || 'U'
+  const initials = (name) => name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'U'
+
+  const hasAvatar = user?.avatar_url && !avatarError
 
   return (
     <div style={s.shell}>
@@ -184,7 +195,21 @@ export default function EmployeeLayout() {
       <div style={s.sidebar}>
         <div style={s.sideHeader}>
           <div style={s.sysLabel}>SENTINEL // EMPLOYEE</div>
-          <div style={s.avatar}>{initials(user?.full_name)}</div>
+
+          {/* Avatar: image if available, initials as fallback */}
+          <div style={s.avatar}>
+            {hasAvatar ? (
+              <img
+                src={user.avatar_url}
+                alt={user.full_name}
+                style={s.avatarImg}
+                onError={() => setAvatarError(true)}
+              />
+            ) : (
+              initials(user?.full_name)
+            )}
+          </div>
+
           <div style={s.userName}>{user?.full_name?.split(' ')[0]}</div>
           <div style={s.userDept}>{user?.department || 'Employee'}</div>
         </div>
