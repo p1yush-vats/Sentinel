@@ -3,7 +3,7 @@ import { useTheme } from './ThemeContext'
 import { useAuthStore } from '../store/authStore'
 import { sessionsAPI } from '../services/api'
 import api from '../services/api'
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isToday, getDay, subMonths, addMonths } from 'date-fns'
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isToday, getDay, subMonths, addMonths } from 'date-fns'
 
 function toUTC(iso) {
   if (!iso) return iso
@@ -13,13 +13,14 @@ function toUTC(iso) {
 
 export default function MyCalendar() {
   const { theme } = useTheme()
-  const { user } = useAuthStore()
+  const { user }  = useAuthStore()
   const [currentMonth, setCurrentMonth] = useState(new Date())
-  const [sessions, setSessions] = useState([])
-  const [leaves, setLeaves] = useState([])
-  const [teamLeaves, setTeamLeaves] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [selected, setSelected] = useState(null)
+  const [sessions,     setSessions]     = useState([])
+  const [leaves,       setLeaves]       = useState([])
+  const [teamLeaves,   setTeamLeaves]   = useState([])
+  const [loading,      setLoading]      = useState(true)
+  const [selected,     setSelected]     = useState(null)
+  const t = theme
 
   useEffect(() => {
     Promise.all([
@@ -33,130 +34,123 @@ export default function MyCalendar() {
     }).catch(() => {}).finally(() => setLoading(false))
   }, [])
 
-  const monthStart = startOfMonth(currentMonth)
-  const monthEnd = endOfMonth(currentMonth)
-  const days = eachDayOfInterval({ start: monthStart, end: monthEnd })
-
-  // Pad start
-  const startPad = getDay(monthStart) // 0=Sun
-  const paddedDays = [...Array(startPad).fill(null), ...days]
+  const monthStart  = startOfMonth(currentMonth)
+  const monthEnd    = endOfMonth(currentMonth)
+  const days        = eachDayOfInterval({ start: monthStart, end: monthEnd })
+  const startPad    = getDay(monthStart)
+  const paddedDays  = [...Array(startPad).fill(null), ...days]
 
   function getDayData(date) {
     if (!date) return null
-    const dayStr = format(date, 'yyyy-MM-dd')
-
-    const daySessions = sessions.filter(s => {
-      const st = new Date(toUTC(s.start_time))
-      return format(st, 'yyyy-MM-dd') === dayStr
-    })
-
+    const dayStr    = format(date, 'yyyy-MM-dd')
+    const daySess   = sessions.filter(s => format(new Date(toUTC(s.start_time)), 'yyyy-MM-dd') === dayStr)
     const dayLeaves = leaves.filter(l => {
-      const from = new Date(l.from_date)
-      const to = new Date(l.to_date)
       const d = new Date(dayStr)
-      return d >= from && d <= to && l.status === 'approved'
+      return d >= new Date(l.from_date) && d <= new Date(l.to_date) && l.status === 'approved'
     })
-
-    const dayTeamLeaves = teamLeaves.filter(l => {
-      const from = new Date(l.from_date)
-      const to = new Date(l.to_date)
+    const dayTeam   = teamLeaves.filter(l => {
       const d = new Date(dayStr)
-      return d >= from && d <= to && l.status === 'approved' && l.employee_id !== user?.id
+      return d >= new Date(l.from_date) && d <= new Date(l.to_date) && l.status === 'approved' && l.employee_id !== user?.id
     })
-
-    return { daySessions, dayLeaves, dayTeamLeaves }
+    return { daySessions: daySess, dayLeaves, dayTeamLeaves: dayTeam }
   }
 
   function getDayStatus(date) {
     if (!date) return null
-    const data = getDayData(date)
-    if (!data) return null
-    const { daySessions, dayLeaves } = data
+    const { daySessions, dayLeaves } = getDayData(date)
     const dow = date.getDay()
     if (dow === 0 || dow === 6) return 'weekend'
-    if (dayLeaves.length > 0) return 'leave'
+    if (dayLeaves.length > 0)   return 'leave'
     if (daySessions.length > 0) {
-      const totalWork = daySessions.reduce((a, s) => a + (s.total_work_minutes || 0), 0)
-      if (totalWork >= 360) return 'full'
-      if (totalWork >= 120) return 'partial'
-      return 'partial'
+      const total = daySessions.reduce((a, s) => a + (s.total_work_minutes || 0), 0)
+      return total >= 360 ? 'full' : 'partial'
     }
     if (date > new Date()) return 'future'
     return 'absent'
   }
 
   const statusConfig = {
-    full:    { bg: theme.success, label: 'Full Day', color: '#fff' },
-    partial: { bg: theme.warning, label: 'Partial', color: '#000' },
-    leave:   { bg: theme.info, label: 'On Leave', color: '#fff' },
-    absent:  { bg: theme.dangerBg || theme.danger + '20', label: 'Absent', color: theme.danger },
-    weekend: { bg: theme.surface, label: 'Weekend', color: theme.textMuted },
-    future:  { bg: 'transparent', label: 'Upcoming', color: theme.textMuted },
+    full:    { bg: t.success,                   label: 'Full Day',  color: '#fff' },
+    partial: { bg: t.warning,                   label: 'Partial',   color: '#000' },
+    leave:   { bg: t.info,                      label: 'On Leave',  color: '#fff' },
+    absent:  { bg: (t.danger || '#ff4444') + '25', label: 'Absent', color: t.danger || '#ff4444' },
+    weekend: { bg: t.surface,                   label: 'Weekend',   color: t.textMuted },
+    future:  { bg: 'transparent',               label: 'Upcoming',  color: t.textMuted },
   }
 
   const selectedData = selected ? getDayData(selected) : null
 
+  const monthlySummary = [
+    { label: 'PRESENT', value: days.filter(d => getDayStatus(d) === 'full').length,    color: t.success },
+    { label: 'PARTIAL', value: days.filter(d => getDayStatus(d) === 'partial').length, color: t.warning },
+    { label: 'ON LEAVE',value: days.filter(d => getDayStatus(d) === 'leave').length,   color: t.info },
+    { label: 'ABSENT',  value: days.filter(d => getDayStatus(d) === 'absent').length,  color: t.danger },
+  ]
+
   return (
     <div>
+      <style>{`
+        .cal-layout { display: grid; grid-template-columns: 1fr; gap: 20px; }
+        .cal-summary { display: grid; grid-template-columns: repeat(4,1fr); gap:0; margin-top:16px; border:2px solid ${t.border}; }
+        .cal-legend  { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+        @media (min-width: 860px) { .cal-layout { grid-template-columns: 1fr 280px; } }
+      `}</style>
+
       {/* Header */}
-      <div style={{ marginBottom: '32px' }}>
-        <div style={{ fontSize: '9px', letterSpacing: '3px', color: theme.accent, fontWeight: '700', marginBottom: '8px' }}>ATTENDANCE & LEAVE</div>
-        <div style={{ fontSize: '32px', fontWeight: '900', letterSpacing: '-2px', color: theme.text }}>CALENDAR.</div>
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontSize: 9, letterSpacing: '3px', color: t.accent, fontWeight: 700, marginBottom: 6 }}>ATTENDANCE & LEAVE</div>
+        <div style={{ fontSize: 'clamp(22px, 6vw, 32px)', fontWeight: 900, letterSpacing: '-2px', color: t.text }}>CALENDAR.</div>
       </div>
 
       {/* Legend */}
-      <div style={{ display: 'flex', gap: '16px', marginBottom: '24px', flexWrap: 'wrap' }}>
+      <div className="cal-legend">
         {Object.entries(statusConfig).filter(([k]) => k !== 'future').map(([key, val]) => (
-          <div key={key} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <div style={{ width: '10px', height: '10px', background: val.bg, border: `1px solid ${theme.border}` }} />
-            <span style={{ fontSize: '9px', letterSpacing: '1px', color: theme.textMuted, fontWeight: '700' }}>{val.label.toUpperCase()}</span>
+          <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ width: 10, height: 10, background: val.bg, border: `1px solid ${t.border}`, flexShrink: 0 }} />
+            <span style={{ fontSize: 8, letterSpacing: '1px', color: t.textMuted, fontWeight: 700 }}>{val.label.toUpperCase()}</span>
           </div>
         ))}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <div style={{ width: '10px', height: '10px', background: theme.infoBg || theme.info + '30', border: `2px solid ${theme.info}` }} />
-          <span style={{ fontSize: '9px', letterSpacing: '1px', color: theme.textMuted, fontWeight: '700' }}>TEAM ON LEAVE</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <div style={{ width: 10, height: 10, background: (t.info || '#0088ff') + '30', border: `2px solid ${t.info}`, flexShrink: 0 }} />
+          <span style={{ fontSize: 8, letterSpacing: '1px', color: t.textMuted, fontWeight: 700 }}>TEAM ON LEAVE</span>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: '24px' }}>
+      <div className="cal-layout">
         {/* Calendar */}
         <div>
           {/* Month nav */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <button
-              onClick={() => setCurrentMonth(m => subMonths(m, 1))}
-              style={{ background: 'transparent', border: `2px solid ${theme.border}`, color: theme.text, padding: '8px 14px', cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit', fontWeight: '700' }}
-            >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <button onClick={() => setCurrentMonth(m => subMonths(m, 1))}
+              style={{ background: 'transparent', border: `2px solid ${t.border}`, color: t.text, padding: '7px 14px', cursor: 'pointer', fontSize: 13, fontFamily: 'inherit', fontWeight: 700 }}>
               ←
             </button>
-            <div style={{ fontSize: '14px', fontWeight: '900', letterSpacing: '2px', color: theme.text }}>
+            <div style={{ fontSize: 13, fontWeight: 900, letterSpacing: '2px', color: t.text }}>
               {format(currentMonth, 'MMMM yyyy').toUpperCase()}
             </div>
-            <button
-              onClick={() => setCurrentMonth(m => addMonths(m, 1))}
-              style={{ background: 'transparent', border: `2px solid ${theme.border}`, color: theme.text, padding: '8px 14px', cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit', fontWeight: '700' }}
-            >
+            <button onClick={() => setCurrentMonth(m => addMonths(m, 1))}
+              style={{ background: 'transparent', border: `2px solid ${t.border}`, color: t.text, padding: '7px 14px', cursor: 'pointer', fontSize: 13, fontFamily: 'inherit', fontWeight: 700 }}>
               →
             </button>
           </div>
 
           {/* Day headers */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px', marginBottom: '2px' }}>
-            {['SUN','MON','TUE','WED','THU','FRI','SAT'].map(d => (
-              <div key={d} style={{ textAlign: 'center', fontSize: '9px', letterSpacing: '1px', fontWeight: '700', color: theme.textMuted, padding: '8px 0' }}>{d}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 2, marginBottom: 2 }}>
+            {['S','M','T','W','T','F','S'].map((d, i) => (
+              <div key={i} style={{ textAlign: 'center', fontSize: 8, letterSpacing: '1px', fontWeight: 700, color: t.textMuted, padding: '6px 0' }}>{d}</div>
             ))}
           </div>
 
-          {/* Days grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px' }}>
+          {/* Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 2 }}>
             {paddedDays.map((date, i) => {
               if (!date) return <div key={`pad-${i}`} />
-              const status = getDayStatus(date)
-              const cfg = statusConfig[status] || statusConfig.future
-              const data = getDayData(date)
-              const today = isToday(date)
-              const isSelected = selected && format(selected, 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd')
-              const hasTeamLeave = data?.dayTeamLeaves?.length > 0
+              const status  = getDayStatus(date)
+              const cfg     = statusConfig[status] || statusConfig.future
+              const data    = getDayData(date)
+              const today   = isToday(date)
+              const isSel   = selected && format(selected,'yyyy-MM-dd') === format(date,'yyyy-MM-dd')
+              const hasTeam = data?.dayTeamLeaves?.length > 0
 
               return (
                 <div
@@ -165,32 +159,26 @@ export default function MyCalendar() {
                   style={{
                     aspectRatio: '1',
                     background: cfg.bg,
-                    border: isSelected
-                      ? `2px solid ${theme.accent}`
+                    border: isSel
+                      ? `2px solid ${t.accent}`
                       : today
-                        ? `2px solid ${theme.text}`
-                        : hasTeamLeave
-                          ? `2px solid ${theme.info}`
-                          : `1px solid ${theme.border}`,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    position: 'relative',
-                    transition: 'opacity 0.1s',
+                        ? `2px solid ${t.text}`
+                        : hasTeam
+                          ? `2px solid ${t.info}`
+                          : `1px solid ${t.border}`,
+                    display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'center',
+                    cursor: 'pointer', position: 'relative',
                   }}
-                  onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-                  onMouseLeave={e => e.currentTarget.style.opacity = '1'}
                 >
-                  <span style={{ fontSize: '11px', fontWeight: today ? '900' : '700', color: cfg.color }}>
+                  <span style={{ fontSize: 'clamp(9px, 2vw, 11px)', fontWeight: today ? 900 : 700, color: cfg.color }}>
                     {format(date, 'd')}
                   </span>
                   {data?.daySessions?.length > 0 && (
-                    <div style={{ width: '4px', height: '4px', background: cfg.color, borderRadius: '50%', marginTop: '2px', opacity: 0.7 }} />
+                    <div style={{ width: 3, height: 3, background: cfg.color, borderRadius: '50%', marginTop: 1, opacity: 0.7 }} />
                   )}
-                  {hasTeamLeave && (
-                    <div style={{ position: 'absolute', top: '2px', right: '2px', width: '4px', height: '4px', background: theme.info, borderRadius: '50%' }} />
+                  {hasTeam && (
+                    <div style={{ position: 'absolute', top: 2, right: 2, width: 3, height: 3, background: t.info, borderRadius: '50%' }} />
                   )}
                 </div>
               )
@@ -198,16 +186,11 @@ export default function MyCalendar() {
           </div>
 
           {/* Monthly summary */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0', marginTop: '24px', border: `2px solid ${theme.border}` }}>
-            {[
-              { label: 'PRESENT', value: days.filter(d => getDayStatus(d) === 'full').length, color: theme.success },
-              { label: 'PARTIAL', value: days.filter(d => getDayStatus(d) === 'partial').length, color: theme.warning },
-              { label: 'ON LEAVE', value: days.filter(d => getDayStatus(d) === 'leave').length, color: theme.info },
-              { label: 'ABSENT', value: days.filter(d => getDayStatus(d) === 'absent').length, color: theme.danger },
-            ].map((s, i) => (
-              <div key={i} style={{ padding: '16px', borderRight: i < 3 ? `2px solid ${theme.border}` : 'none', background: theme.card, textAlign: 'center' }}>
-                <div style={{ fontSize: '24px', fontWeight: '900', color: s.color }}>{s.value}</div>
-                <div style={{ fontSize: '9px', letterSpacing: '2px', color: theme.textMuted, marginTop: '4px' }}>{s.label}</div>
+          <div className="cal-summary">
+            {monthlySummary.map((s, i) => (
+              <div key={i} style={{ padding: '12px 8px', borderRight: i < 3 ? `2px solid ${t.border}` : 'none', background: t.card, textAlign: 'center' }}>
+                <div style={{ fontSize: 'clamp(18px, 4vw, 22px)', fontWeight: 900, color: s.color }}>{s.value}</div>
+                <div style={{ fontSize: 7, letterSpacing: '1.5px', color: t.textMuted, marginTop: 3 }}>{s.label}</div>
               </div>
             ))}
           </div>
@@ -215,54 +198,52 @@ export default function MyCalendar() {
 
         {/* Day detail panel */}
         <div>
-          <div style={{ fontSize: '9px', letterSpacing: '3px', color: theme.textMuted, fontWeight: '700', marginBottom: '16px' }}>
+          <div style={{ fontSize: 8, letterSpacing: '3px', color: t.textMuted, fontWeight: 700, marginBottom: 14 }}>
             {selected ? format(selected, 'EEEE, dd MMMM').toUpperCase() : 'SELECT A DAY'}
           </div>
 
           {selected && selectedData ? (
             <div>
               {/* Sessions */}
-              <div style={{ background: theme.card, border: `2px solid ${theme.border}`, padding: '16px', marginBottom: '12px' }}>
-                <div style={{ fontSize: '9px', letterSpacing: '2px', color: theme.textMuted, fontWeight: '700', marginBottom: '12px' }}>MY SESSIONS</div>
+              <div style={{ background: t.card, border: `2px solid ${t.border}`, padding: 14, marginBottom: 10 }}>
+                <div style={{ fontSize: 8, letterSpacing: '2px', color: t.textMuted, fontWeight: 700, marginBottom: 10 }}>MY SESSIONS</div>
                 {selectedData.daySessions.length === 0 ? (
-                  <div style={{ fontSize: '10px', color: theme.textMuted }}>No sessions this day</div>
+                  <div style={{ fontSize: 10, color: t.textMuted }}>No sessions this day</div>
                 ) : selectedData.daySessions.map(s => (
-                  <div key={s.id} style={{ marginBottom: '8px' }}>
-                    <div style={{ fontSize: '11px', fontWeight: '700', color: theme.text }}>{s.total_work_minutes || 0} min worked</div>
-                    <div style={{ fontSize: '10px', color: theme.textMuted }}>{s.total_break_minutes || 0} min break · {s.status}</div>
+                  <div key={s.id} style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: t.text }}>{s.total_work_minutes || 0} min worked</div>
+                    <div style={{ fontSize: 9, color: t.textMuted }}>{s.total_break_minutes || 0} min break · {s.status}</div>
                   </div>
                 ))}
               </div>
 
-              {/* Own leave */}
               {selectedData.dayLeaves.length > 0 && (
-                <div style={{ background: theme.card, border: `2px solid ${theme.info}`, padding: '16px', marginBottom: '12px' }}>
-                  <div style={{ fontSize: '9px', letterSpacing: '2px', color: theme.info, fontWeight: '700', marginBottom: '8px' }}>ON LEAVE</div>
+                <div style={{ background: t.card, border: `2px solid ${t.info}`, padding: 14, marginBottom: 10 }}>
+                  <div style={{ fontSize: 8, letterSpacing: '2px', color: t.info, fontWeight: 700, marginBottom: 8 }}>ON LEAVE</div>
                   {selectedData.dayLeaves.map((l, i) => (
-                    <div key={i} style={{ fontSize: '11px', color: theme.text }}>{l.leave_type} — {l.reason}</div>
+                    <div key={i} style={{ fontSize: 11, color: t.text }}>{l.leave_type} — {l.reason}</div>
                   ))}
                 </div>
               )}
 
-              {/* Team leaves */}
               {selectedData.dayTeamLeaves.length > 0 && (
-                <div style={{ background: theme.card, border: `2px solid ${theme.border}`, padding: '16px' }}>
-                  <div style={{ fontSize: '9px', letterSpacing: '2px', color: theme.textMuted, fontWeight: '700', marginBottom: '12px' }}>
+                <div style={{ background: t.card, border: `2px solid ${t.border}`, padding: 14 }}>
+                  <div style={{ fontSize: 8, letterSpacing: '2px', color: t.textMuted, fontWeight: 700, marginBottom: 10 }}>
                     TEAM ON LEAVE ({selectedData.dayTeamLeaves.length})
                   </div>
                   {selectedData.dayTeamLeaves.map((l, i) => (
-                    <div key={i} style={{ fontSize: '10px', color: theme.textSub, marginBottom: '6px', display: 'flex', justifyContent: 'space-between' }}>
+                    <div key={i} style={{ fontSize: 10, color: t.textSub, marginBottom: 5, display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
                       <span>{l.employee_name || 'Team member'}</span>
-                      <span style={{ color: theme.info }}>{l.leave_type}</span>
+                      <span style={{ color: t.info }}>{l.leave_type}</span>
                     </div>
                   ))}
                 </div>
               )}
             </div>
           ) : (
-            <div style={{ background: theme.card, border: `2px solid ${theme.border}`, padding: '30px', textAlign: 'center' }}>
-              <div style={{ fontSize: '24px', color: theme.border, marginBottom: '8px' }}>▦</div>
-              <div style={{ fontSize: '10px', color: theme.textMuted, letterSpacing: '1px' }}>CLICK ANY DAY TO VIEW DETAILS</div>
+            <div style={{ background: t.card, border: `2px solid ${t.border}`, padding: 28, textAlign: 'center' }}>
+              <div style={{ fontSize: 22, color: t.border, marginBottom: 8 }}>▦</div>
+              <div style={{ fontSize: 9, color: t.textMuted, letterSpacing: '1px' }}>CLICK ANY DAY TO VIEW DETAILS</div>
             </div>
           )}
         </div>
