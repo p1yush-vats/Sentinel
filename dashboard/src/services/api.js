@@ -1,6 +1,7 @@
 import axios from 'axios'
 
 const api = axios.create({ baseURL: '/api/v1', timeout: 15000 })
+
 api.interceptors.response.use(
   (r) => r,
   (err) => {
@@ -14,12 +15,14 @@ api.interceptors.response.use(
 
 export default api
 
-export const authAPI      = {
+// ── Auth ─────────────────────────────────────────────────────
+export const authAPI = {
   login:  (d) => api.post('/auth/login', d),
   me:     ()  => api.get('/auth/me'),
   logout: ()  => api.post('/auth/logout'),
 }
 
+// ── Admin: Employees ──────────────────────────────────────────
 export const employeesAPI = {
   getAll:  (p)      => api.get('/employees/', { params: p }),
   getOne:  (id)     => api.get(`/employees/${id}`),
@@ -28,27 +31,38 @@ export const employeesAPI = {
   remove:  (id)     => api.delete(`/employees/${id}`),
 }
 
-export const sessionsAPI  = {
-  // admin route — supports employee_id, status, limit, offset
-  getAll:  (p)      => api.get('/sessions/all', { params: p }),
-  getOne:  (id)     => api.get(`/sessions/${id}`),
-  getLogs: (id)     => api.get(`/sessions/${id}/logs`),
+// ── Sessions (admin + employee) ───────────────────────────────
+export const sessionsAPI = {
+  // Admin
+  getAll:       (p)  => api.get('/sessions/all', { params: p }),
+  getOne:       (id) => api.get(`/sessions/${id}`),
+  getLogs:      (id) => api.get(`/sessions/${id}/logs`),
+  // Employee — own sessions only
+  getMySessions: (p) => api.get('/sessions/', { params: p }),
 }
 
-export const flagsAPI     = {
-  // returns ALL unreviewed; pass min_confidence to filter
+// ── Flags / Abnormalities ─────────────────────────────────────
+export const flagsAPI = {
+  // Admin
   getUnreviewed: (p)      => api.get('/abnormalities/all/unreviewed', { params: p }),
   getAll:        (p)      => api.get('/abnormalities/', { params: p }),
   review:        (id, d)  => api.post(`/abnormalities/${id}/review`, d),
   adminAction:   (d)      => api.post('/abnormalities/admin-actions', d),
+  // Employee — own flags
+  getMyFlags:    (p)      => api.get('/abnormalities/', { params: p }),
 }
 
-export const appealsAPI   = {
-  // admin route — all appeals
-  getAll:  (p)      => api.get('/appeals/all', { params: p }),
-  review:  (id, d)  => api.post(`/appeals/${id}/review`, d),
+// ── Appeals ───────────────────────────────────────────────────
+export const appealsAPI = {
+  // Admin
+  getAll:       (p)      => api.get('/appeals/all', { params: p }),
+  review:       (id, d)  => api.post(`/appeals/${id}/review`, d),
+  // Employee
+  getMyAppeals: (p)      => api.get('/appeals/', { params: p }),
+  submit:       (d)      => api.post('/appeals/', d),
 }
 
+// ── Work rules ────────────────────────────────────────────────
 export const workRulesAPI = {
   getAll:  ()       => api.get('/work-rules/'),
   update:  (id, d)  => api.patch(`/work-rules/${id}`, d),
@@ -56,11 +70,13 @@ export const workRulesAPI = {
   remove:  (id)     => api.delete(`/work-rules/${id}`),
 }
 
-export const metricsAPI   = {
+// ── Metrics ───────────────────────────────────────────────────
+export const metricsAPI = {
   getByEmployee: (id, p) => api.get(`/productivity-metrics/employee/${id}`, { params: p }),
   getBySession:  (id)    => api.get(`/productivity-metrics/session/${id}`),
 }
 
-export const auditAPI     = {
+// ── Audit ─────────────────────────────────────────────────────
+export const auditAPI = {
   getAll: (p) => api.get('/audit/', { params: p }),
 }

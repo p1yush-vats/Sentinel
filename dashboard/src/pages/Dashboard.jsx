@@ -50,24 +50,40 @@ export default function Dashboard() {
 
       const parseDay = (raw) => {
         if (!raw) return ''
-        const dt = new Date(raw.includes('Z') || raw.includes('+') ? raw : raw + 'Z')
+        const dt = new Date(toUTC(raw))
         return format(dt, 'yyyy-MM-dd')
       }
-      const todayStr = format(new Date(), 'yyyy-MM-dd')
 
       // ── 7-day session trend ─────────────────────────────
       const days = Array.from({ length: 7 }, (_, i) => {
         const d      = subDays(new Date(), 6 - i)
         const dayStr = format(d, 'yyyy-MM-dd')
         const label  = format(d, 'EEE')
-        const count     = sess.filter(s => parseDay(s.start_time)          === dayStr).length
-        const flagCount = flgs.filter(f => parseDay(f.first_detected_at)   === dayStr).length
+        const count     = sess.filter(s => parseDay(s.start_time) === dayStr).length
+        const flagCount = flgs.filter(f => parseDay(f.first_detected_at) === dayStr).length
         return { date: label, sessions: count, flags: flagCount }
       })
       setSessionTrend(days)
 
-      // ── Top risky employees ─────────────────────────────
+      // ── High risk employees ─────────────────────────────
+      // Build risk score per employee from their sessions
+      const empRiskMap = {}
+      sess.forEach(s => {
+        if (!empRiskMap[s.employee_id]) {
+          empRiskMap[s.employee_id] = { maxRisk: 0, sessionCount: 0 }
+        }
+        empRiskMap[s.employee_id].maxRisk = Math.max(
+          empRiskMap[s.employee_id].maxRisk,
+          s.risk_score || 0
+        )
+        empRiskMap[s.employee_id].sessionCount++
+      })
+
       const risky = emps
+        .map(e => ({
+          ...e,
+          risk_score: empRiskMap[e.id]?.maxRisk || e.risk_score || 0
+        }))
         .filter(e => (e.risk_score || 0) > 0)
         .sort((a, b) => (b.risk_score || 0) - (a.risk_score || 0))
       setTopRisk(risky)
@@ -77,19 +93,9 @@ export default function Dashboard() {
       const completed   = sess.filter(s => s.status === 'completed').length
       const flaggedSess = sess.filter(s => s.status === 'flagged').length
       const avgRisk     = totalSess ? sess.reduce((a, s) => a + (s.risk_score || 0), 0) / totalSess : 0
-      const lunchPct    = totalSess ? sess.filter(s => s.lunch_taken).length / totalSess * 100 : 0
-      const pasteFlags  = flgs.filter(f => {
-        const types = Object.keys(f.detections || {})
-        return types.some(t => t.includes('paste'))
-      }).length
-      const idleFlags = flgs.filter(f => {
-        const types = Object.keys(f.detections || {})
-        return types.some(t => t.includes('idle'))
-      }).length
-      const mouseFlags = flgs.filter(f => {
-        const types = Object.keys(f.detections || {})
-        return types.some(t => t.includes('mouse'))
-      }).length
+      const pasteFlags  = flgs.filter(f => Object.keys(f.detections || {}).some(t => t.includes('paste'))).length
+      const idleFlags   = flgs.filter(f => Object.keys(f.detections || {}).some(t => t.includes('idle'))).length
+      const mouseFlags  = flgs.filter(f => Object.keys(f.detections || {}).some(t => t.includes('mouse'))).length
 
       setRadarData([
         { subject: 'Idle Time',    value: Math.min(idleFlags  * 15, 100) },
@@ -102,15 +108,17 @@ export default function Dashboard() {
     }).catch(() => {}).finally(() => setLoading(false))
   }, [])
 
-  // ── Today's sessions (fixed) ─────────────────────────────
   const todayStr       = format(new Date(), 'yyyy-MM-dd')
   const parseDay = (raw) => {
     if (!raw) return ''
-    const dt = new Date(raw.includes('Z') || raw.includes('+') ? raw : raw + 'Z')
+    const dt = new Date(toUTC(raw))
     return format(dt, 'yyyy-MM-dd')
   }
   const todaySessions  = sessions.filter(s => parseDay(s.start_time) === todayStr)
   const activeSessions = sessions.filter(s => s.status === 'active')
+
+  // Build active session employee IDs set for live indicators
+  const activeEmployeeIds = new Set(activeSessions.map(s => s.employee_id))
 
   return (
     <div className="space-y-6">
@@ -123,7 +131,7 @@ export default function Dashboard() {
 
       <div className="glow-line" />
 
-      {/* Stats — all numbers are real now */}
+      {/* Stats */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
         <StatCard label="Total Employees"  value={employees.length}        icon={Users}         accent="cyan"   loading={loading} trendLabel="Active workforce" trend={0} />
         <StatCard label="Active Sessions"  value={activeSessions.length}   icon={Activity}      accent="green"  loading={loading} trendLabel="Right now" trend={activeSessions.length > 0 ? 1 : 0} />
@@ -133,7 +141,6 @@ export default function Dashboard() {
 
       {/* Charts row */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        {/* Session trend */}
         <div className="xl:col-span-2 card p-5 animate-fade-in stagger-2">
           <div className="flex items-center justify-between mb-5">
             <h3 className="section-title">Session Activity</h3>
@@ -160,7 +167,6 @@ export default function Dashboard() {
           </ResponsiveContainer>
         </div>
 
-        {/* Real risk radar */}
         <div className="card p-5 animate-fade-in stagger-3">
           <h3 className="section-title mb-1">Risk Distribution</h3>
           <p className="text-[11px] font-mono text-sentinel-muted mb-3">Flagged behaviour patterns</p>
@@ -178,11 +184,45 @@ export default function Dashboard() {
 
       {/* Bottom row */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <TopFlagged employees={topRisk} loading={loading} onEmployeeClick={id => navigate(`/employees/${id}`)} />
+        <TopFlagged
+          employees={topRisk}
+          loading={loading}
+          activeEmployeeIds={activeEmployeeIds}
+          onEmployeeClick={id => navigate(`/employees/${id}`)}
+        />
         <div className="xl:col-span-2">
           <LiveFeed />
         </div>
       </div>
+
+      {/* Active employees live strip */}
+      {activeSessions.length > 0 && (
+        <div className="card p-4 border-emerald-400/20 animate-fade-in">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-xs font-mono text-emerald-400 font-bold">
+              {activeSessions.length} EMPLOYEE{activeSessions.length > 1 ? 'S' : ''} CURRENTLY WORKING
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {activeSessions.map(s => {
+              const emp = employees.find(e => e.id === s.employee_id)
+              if (!emp) return null
+              return (
+                <div
+                  key={s.id}
+                  onClick={() => navigate(`/employees/${emp.id}`)}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-emerald-400/10 border border-emerald-400/20 rounded-lg cursor-pointer hover:bg-emerald-400/20 transition-all"
+                >
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                  <span className="text-xs font-mono text-emerald-400">{emp.full_name}</span>
+                  <span className="text-[10px] font-mono text-emerald-400/60">{emp.department}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

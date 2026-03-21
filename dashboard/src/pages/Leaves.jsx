@@ -1,34 +1,44 @@
-import { useState } from 'react'
-import { Calendar, CheckCircle, XCircle, Clock } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Calendar, CheckCircle, XCircle, Clock, User } from 'lucide-react'
 import toast from 'react-hot-toast'
-
-// Leave system — stored locally until backend endpoint is added
-// Backend endpoint: POST /leaves, GET /leaves/all, PATCH /leaves/{id}/review
-
-const MOCK_LEAVES = [
-  { id: '1', employee: 'Vikram Nair',   department: 'Engineering', type: 'Sick Leave',   from: '2026-03-20', to: '2026-03-21', reason: 'Medical appointment', status: 'pending',  submitted: '2026-03-18' },
-  { id: '2', employee: 'Priya Sharma',  department: 'HR',          type: 'Casual Leave',  from: '2026-03-25', to: '2026-03-25', reason: 'Personal work',       status: 'pending',  submitted: '2026-03-17' },
-  { id: '3', employee: 'Rahul Mehta',   department: 'Sales',       type: 'Earned Leave',  from: '2026-04-01', to: '2026-04-03', reason: 'Family function',      status: 'approved', submitted: '2026-03-10' },
-  { id: '4', employee: 'Sneha Kapoor',  department: 'Finance',     type: 'Sick Leave',    from: '2026-03-19', to: '2026-03-19', reason: 'Fever',               status: 'approved', submitted: '2026-03-18' },
-  { id: '5', employee: 'Aditya Kumar',  department: 'Engineering', type: 'Casual Leave',  from: '2026-03-22', to: '2026-03-22', reason: 'Personal',            status: 'rejected', submitted: '2026-03-15' },
-]
+import api from '../services/api'
 
 const STATUS_STYLE = {
-  pending:  { badge: 'badge-medium', icon: Clock,         color: 'text-amber-400' },
-  approved: { badge: 'badge-low',    icon: CheckCircle,   color: 'text-emerald-400' },
-  rejected: { badge: 'badge-critical', icon: XCircle,     color: 'text-red-400' },
+  pending:  { badge: 'badge-medium',   icon: Clock,        color: 'text-amber-400' },
+  approved: { badge: 'badge-low',      icon: CheckCircle,  color: 'text-emerald-400' },
+  rejected: { badge: 'badge-critical', icon: XCircle,      color: 'text-red-400' },
 }
 
 const TYPE_COLORS = {
-  'Sick Leave':   'text-red-400',
-  'Casual Leave': 'text-cyan-400',
-  'Earned Leave': 'text-purple-400',
+  EL: 'text-blue-400',
+  CL: 'text-red-400',
+  SL: 'text-amber-400',
+  ML: 'text-pink-400',
+}
+
+const TYPE_NAMES = {
+  EL: 'Earned Leave',
+  CL: 'Casual Leave',
+  SL: 'Sick Leave',
+  ML: 'Maternity Leave',
 }
 
 export default function Leaves() {
-  const [leaves,  setLeaves]  = useState(MOCK_LEAVES)
-  const [filter,  setFilter]  = useState('all')
-  const [acting,  setActing]  = useState(null)
+  const [leaves,   setLeaves]   = useState([])
+  const [loading,  setLoading]  = useState(true)
+  const [filter,   setFilter]   = useState('all')
+  const [acting,   setActing]   = useState(null)
+  const [response, setResponse] = useState({})
+
+  const load = () => {
+    setLoading(true)
+    api.get('/leaves/all')
+      .then(r => setLeaves(r.data?.leaves || []))
+      .catch(() => toast.error('Failed to load leave requests'))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => { load() }, [])
 
   const filtered = filter === 'all' ? leaves : leaves.filter(l => l.status === filter)
 
@@ -38,20 +48,34 @@ export default function Leaves() {
     rejected: leaves.filter(l => l.status === 'rejected').length,
   }
 
-  const act = (id, status) => {
+  const act = async (id, status) => {
+    const adminResponse = response[id]?.trim()
+    if (!adminResponse) {
+      toast.error('Please add a response before deciding')
+      return
+    }
     setActing(id)
-    setTimeout(() => {
-      setLeaves(prev => prev.map(l => l.id === id ? { ...l, status } : l))
+    try {
+      await api.post(`/leaves/${id}/review`, { status, admin_response: adminResponse })
       toast.success(`Leave request ${status}`)
+      setLeaves(prev => prev.map(l =>
+        l.id === id ? { ...l, status, admin_response: adminResponse } : l
+      ))
+      setResponse(prev => ({ ...prev, [id]: '' }))
+    } catch (e) {
+      toast.error(e.response?.data?.detail || `Failed to ${status} leave`)
+    } finally {
       setActing(null)
-    }, 600)
+    }
   }
 
   return (
     <div className="space-y-5">
       <div className="animate-fade-in">
         <h1 className="font-display font-bold text-2xl text-sentinel-text">Leave Requests</h1>
-        <p className="text-sentinel-muted text-sm font-mono mt-1">Manage employee leave applications</p>
+        <p className="text-sentinel-muted text-sm font-mono mt-1">
+          Manage employee leave applications — {leaves.length} total
+        </p>
       </div>
 
       <div className="glow-line" />
@@ -70,76 +94,124 @@ export default function Leaves() {
         ))}
       </div>
 
-      {/* Filter */}
+      {/* Filter tabs */}
       <div className="flex gap-2 animate-fade-in stagger-2">
         {['all', 'pending', 'approved', 'rejected'].map(f => (
           <button key={f} onClick={() => setFilter(f)}
             className={`px-3 py-1.5 rounded-lg text-xs font-mono border transition-all duration-200 capitalize
-              ${filter === f ? 'bg-cyan-400/10 text-cyan-400 border-cyan-400/20' : 'text-sentinel-muted border-sentinel-border hover:text-sentinel-text'}`}>
+              ${filter === f
+                ? 'bg-cyan-400/10 text-cyan-400 border-cyan-400/20'
+                : 'text-sentinel-muted border-sentinel-border hover:text-sentinel-text'}`}>
             {f}
           </button>
         ))}
       </div>
 
       {/* Cards */}
-      <div className="space-y-3 animate-fade-in stagger-3">
-        {filtered.map((leave, i) => {
-          const st = STATUS_STYLE[leave.status]
-          const Icon = st.icon
-          return (
-            <div key={leave.id} className={`card p-5 transition-all duration-300 ${leave.status === 'pending' ? 'hover:border-amber-400/20' : ''}`}>
-              <div className="flex items-start gap-4">
-                <div className="w-9 h-9 rounded-full bg-navy-900 border border-sentinel-border flex items-center justify-center shrink-0">
-                  <Calendar size={15} className="text-sentinel-muted" />
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <div>
-                      <p className="text-sm font-semibold text-sentinel-text">{leave.employee}</p>
-                      <p className="text-xs font-mono text-sentinel-muted">{leave.department}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className={TYPE_COLORS[leave.type] + ' text-xs font-mono'}>{leave.type}</span>
-                      <span className={st.badge}>{leave.status}</span>
-                    </div>
+      {loading ? (
+        Array(3).fill(0).map((_, i) => (
+          <div key={i} className="card p-5 animate-fade-in">
+            <div className="h-4 bg-navy-700 rounded animate-pulse w-1/2 mb-2" />
+            <div className="h-3 bg-navy-700 rounded animate-pulse w-1/3" />
+          </div>
+        ))
+      ) : filtered.length === 0 ? (
+        <div className="card p-12 text-center animate-fade-in">
+          <Calendar size={28} className="text-sentinel-muted mx-auto mb-3" />
+          <p className="text-sentinel-muted text-sm font-mono">
+            {filter === 'all' ? 'No leave requests yet' : `No ${filter} requests`}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3 animate-fade-in stagger-3">
+          {filtered.map((leave) => {
+            const st = STATUS_STYLE[leave.status] || STATUS_STYLE.pending
+            return (
+              <div key={leave.id}
+                className={`card p-5 transition-all duration-300 ${leave.status === 'pending' ? 'hover:border-amber-400/20' : ''}`}>
+                <div className="flex items-start gap-4">
+                  <div className="w-9 h-9 rounded-full bg-navy-900 border border-sentinel-border flex items-center justify-center shrink-0">
+                    <User size={14} className="text-sentinel-muted" />
                   </div>
 
-                  <div className="flex items-center gap-4 mt-2 flex-wrap">
-                    <span className="text-xs font-mono text-sentinel-text">
-                      {leave.from} → {leave.to}
-                    </span>
-                    <span className="text-xs font-mono text-sentinel-muted">
+                  <div className="flex-1 min-w-0">
+                    {/* Header */}
+                    <div className="flex items-start justify-between gap-3 flex-wrap mb-2">
+                      <div>
+                        <p className="text-sm font-semibold text-sentinel-text">
+                          {leave.employee_name || leave.employee_id?.slice(0, 8) + '…'}
+                        </p>
+                        <p className="text-xs font-mono text-sentinel-muted">
+                          {leave.department || 'Employee'}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`${TYPE_COLORS[leave.leave_type] || 'text-cyan-400'} text-xs font-mono font-bold`}>
+                          {TYPE_NAMES[leave.leave_type] || leave.leave_type}
+                        </span>
+                        <span className={st.badge}>{leave.status}</span>
+                      </div>
+                    </div>
+
+                    {/* Dates + days */}
+                    <div className="flex items-center gap-4 mb-2 flex-wrap">
+                      <span className="text-xs font-mono text-sentinel-text">
+                        {leave.from_date} → {leave.to_date}
+                      </span>
+                      <span className="text-xs font-mono text-sentinel-muted">
+                        {leave.days_requested} working day{leave.days_requested !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+
+                    {/* Reason */}
+                    <p className="text-xs text-sentinel-muted italic mb-2">
                       "{leave.reason}"
-                    </span>
-                  </div>
+                    </p>
 
-                  {leave.status === 'pending' && (
-                    <div className="flex gap-2 mt-3">
-                      <button
-                        onClick={() => act(leave.id, 'approved')}
-                        disabled={acting === leave.id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-emerald-400/10 text-emerald-400 border border-emerald-400/20 hover:bg-emerald-400/20 transition-all disabled:opacity-50"
-                      >
-                        <CheckCircle size={12} />
-                        {acting === leave.id ? '...' : 'Approve'}
-                      </button>
-                      <button
-                        onClick={() => act(leave.id, 'rejected')}
-                        disabled={acting === leave.id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-red-400/10 text-red-400 border border-red-400/20 hover:bg-red-400/20 transition-all disabled:opacity-50"
-                      >
-                        <XCircle size={12} />
-                        {acting === leave.id ? '...' : 'Reject'}
-                      </button>
-                    </div>
-                  )}
+                    {/* Admin response (reviewed leaves) */}
+                    {leave.admin_response && leave.status !== 'pending' && (
+                      <p className={`text-xs font-mono mt-1 ${leave.status === 'approved' ? 'text-emerald-400' : 'text-red-400'}`}>
+                        Response: {leave.admin_response}
+                      </p>
+                    )}
+
+                    {/* Action panel (pending only) */}
+                    {leave.status === 'pending' && (
+                      <div className="mt-3 space-y-2">
+                        <input
+                          type="text"
+                          placeholder="Add a response (required before approving or rejecting)..."
+                          value={response[leave.id] || ''}
+                          onChange={e => setResponse(prev => ({ ...prev, [leave.id]: e.target.value }))}
+                          className="input-field text-xs py-2"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => act(leave.id, 'approved')}
+                            disabled={acting === leave.id}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-emerald-400/10 text-emerald-400 border border-emerald-400/20 hover:bg-emerald-400/20 transition-all disabled:opacity-50"
+                          >
+                            <CheckCircle size={12} />
+                            {acting === leave.id ? '...' : 'Approve'}
+                          </button>
+                          <button
+                            onClick={() => act(leave.id, 'rejected')}
+                            disabled={acting === leave.id}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-red-400/10 text-red-400 border border-red-400/20 hover:bg-red-400/20 transition-all disabled:opacity-50"
+                          >
+                            <XCircle size={12} />
+                            {acting === leave.id ? '...' : 'Reject'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          )
-        })}
-      </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

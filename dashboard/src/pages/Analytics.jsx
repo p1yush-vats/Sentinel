@@ -43,7 +43,7 @@ export default function Analytics() {
   useEffect(() => {
     Promise.all([
       employeesAPI.getAll({ limit: 500 }),
-      sessionsAPI.getAll({ limit: 1000 }),
+      sessionsAPI.getAll({ limit: 500 }),
       flagsAPI.getUnreviewed({ limit: 500 }),
     ]).then(([empRes, sessRes, flagRes]) => {
       setEmployees(empRes.data?.employees || [])

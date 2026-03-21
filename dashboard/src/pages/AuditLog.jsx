@@ -3,29 +3,58 @@ import { auditAPI } from '../services/api'
 import { fmt, fromNow } from '../utils/helpers'
 import { ScrollText, RefreshCw, X } from 'lucide-react'
 
-const EVENT_COLORS = {
-  user_login:           'text-emerald-400',
-  user_logout:          'text-slate-400',
-  login_failed:         'text-orange-400',
-  session_started:      'text-cyan-400',
-  session_ended:        'text-blue-400',
-  session_deleted:      'text-red-400',
-  session_force_ended:  'text-orange-400',
-  abnormality_detected: 'text-red-400',
-  flag_reviewed:        'text-amber-400',
-  admin_action:         'text-rose-400',
-  appeal_submitted:     'text-purple-400',
-  appeal_reviewed:      'text-pink-400',
-  work_rule_created:    'text-cyan-400',
-  work_rule_updated:    'text-cyan-400',
-  work_rule_deleted:    'text-red-400',
-  employee_registered:  'text-emerald-400',
-  password_changed:     'text-amber-400',
-  prefs_updated:        'text-slate-400',
+// Human-readable labels matching LiveFeed
+const EVENT_LABELS = {
+  user_login:           { color: 'text-emerald-400', label: 'Admin Logged In',           icon: '🟢' },
+  user_logout:          { color: 'text-slate-400',   label: 'Admin Logged Out',           icon: '⚫' },
+  login_failed:         { color: 'text-orange-400',  label: 'Failed Login Attempt',       icon: '⚠️' },
+  session_started:      { color: 'text-cyan-400',    label: 'Work Session Started',        icon: '▶️' },
+  session_ended:        { color: 'text-blue-400',    label: 'Work Session Ended',          icon: '⏹️' },
+  session_deleted:      { color: 'text-red-400',     label: 'Session Deleted',             icon: '🗑️' },
+  session_force_ended:  { color: 'text-orange-400',  label: 'Session Force Ended',         icon: '⚡' },
+  abnormality_detected: { color: 'text-red-400',     label: 'Suspicious Activity Detected',icon: '🚨' },
+  flag_reviewed:        { color: 'text-amber-400',   label: 'Flag Reviewed',               icon: '✅' },
+  admin_action:         { color: 'text-rose-400',    label: 'Admin Action',                icon: '🛡️' },
+  appeal_submitted:     { color: 'text-purple-400',  label: 'Appeal Submitted',            icon: '📩' },
+  appeal_reviewed:      { color: 'text-pink-400',    label: 'Appeal Decision Made',        icon: '📋' },
+  work_rule_created:    { color: 'text-cyan-400',    label: 'Work Rule Created',           icon: '📐' },
+  work_rule_updated:    { color: 'text-cyan-400',    label: 'Work Rule Updated',           icon: '✏️' },
+  work_rule_deleted:    { color: 'text-red-400',     label: 'Work Rule Deleted',           icon: '🗑️' },
+  employee_registered:  { color: 'text-emerald-400', label: 'New Employee Added',          icon: '👤' },
+  password_changed:     { color: 'text-amber-400',   label: 'Password Changed',            icon: '🔑' },
+  prefs_updated:        { color: 'text-slate-400',   label: 'Notification Prefs Changed',  icon: '⚙️' },
 }
 
-// All known event types so filter isn't limited to what's in current page
-const ALL_EVENT_TYPES = Object.keys(EVENT_COLORS)
+const ALL_EVENT_TYPES = Object.keys(EVENT_LABELS)
+
+// Build a human-readable detail string from metadata
+function getDetail(log) {
+  const m = log.metadata || {}
+  switch (log.event_type) {
+    case 'session_ended':
+      return `Worked ${m.work_minutes || 0} min · Break ${m.break_minutes || 0} min · Status: ${m.status || '—'}`
+    case 'abnormality_detected':
+      return `Type: ${m.type?.replace(/_/g,' ') || '—'} · Confidence: ${Math.round((m.confidence || 0) * 100)}% · Severity: ${m.severity || '—'}`
+    case 'flag_reviewed':
+      return `Decision: ${m.decision || '—'} · Severity: ${m.severity || '—'}`
+    case 'login_failed':
+      return `Email: ${m.email || '—'}`
+    case 'appeal_reviewed':
+      return `Decision: ${m.decision || '—'}`
+    case 'appeal_submitted':
+      return m.reason_preview || '—'
+    case 'work_rule_created':
+    case 'work_rule_updated':
+    case 'work_rule_deleted':
+      return `Department: ${m.department || 'Global'} · Sensitivity: ${m.sensitivity || '—'}`
+    case 'admin_action':
+      return m.action_type?.replace(/_/g,' ') || m.justification?.slice(0,60) || '—'
+    case 'employee_registered':
+      return `Email: ${m.email || '—'} · Dept: ${m.department || '—'}`
+    default:
+      return log.action?.replace(/_/g,' ') || '—'
+  }
+}
 
 export default function AuditLog() {
   const [logs,       setLogs]       = useState([])
@@ -47,22 +76,13 @@ export default function AuditLog() {
 
   useEffect(() => { load() }, [eventType])
 
-  const clearFilters = () => {
-    setEventType('')
-    setDateFrom('')
-    setDateTo('')
-  }
-
+  const clearFilters = () => { setEventType(''); setDateFrom(''); setDateTo('') }
   const hasFilters = eventType || dateFrom || dateTo
 
-  // Client-side date filter (backend doesn't support date range on audit)
   const filtered = logs.filter(l => {
     if (!l.created_at) return true
     const d = new Date(l.created_at.includes('Z') || l.created_at.includes('+') ? l.created_at : l.created_at + 'Z')
-    if (dateFrom) {
-      const from = new Date(dateFrom)
-      if (d < from) return false
-    }
+    if (dateFrom && d < new Date(dateFrom)) return false
     if (dateTo) {
       const to = new Date(dateTo)
       to.setDate(to.getDate() + 1)
@@ -76,7 +96,7 @@ export default function AuditLog() {
       <div className="flex items-center justify-between animate-fade-in">
         <div>
           <h1 className="font-display font-bold text-2xl text-sentinel-text">Audit Log</h1>
-          <p className="text-sentinel-muted text-sm font-mono mt-1">{filtered.length} entries</p>
+          <p className="text-sentinel-muted text-sm font-mono mt-1">{filtered.length} events recorded</p>
         </div>
         <button onClick={() => load(true)} className="btn-ghost flex items-center gap-2">
           <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
@@ -93,7 +113,9 @@ export default function AuditLog() {
           <select value={eventType} onChange={e => setEventType(e.target.value)} className="input-field w-auto">
             <option value="">All Events</option>
             {ALL_EVENT_TYPES.map(t => (
-              <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
+              <option key={t} value={t}>
+                {EVENT_LABELS[t]?.icon} {EVENT_LABELS[t]?.label || t}
+              </option>
             ))}
           </select>
         </div>
@@ -118,9 +140,8 @@ export default function AuditLog() {
             <thead>
               <tr className="border-b border-sentinel-border">
                 <th className="label text-left px-5 py-3">Event</th>
-                <th className="label text-left px-5 py-3">Action</th>
-                <th className="label text-left px-5 py-3 hidden md:table-cell">Actor</th>
-                <th className="label text-left px-5 py-3 hidden lg:table-cell">Target</th>
+                <th className="label text-left px-5 py-3 hidden md:table-cell">Details</th>
+                <th className="label text-left px-5 py-3 hidden lg:table-cell">Actor</th>
                 <th className="label text-left px-5 py-3">Time</th>
               </tr>
             </thead>
@@ -128,42 +149,51 @@ export default function AuditLog() {
               {loading ? (
                 Array(10).fill(0).map((_, i) => (
                   <tr key={i} className="table-row">
-                    <td colSpan={5} className="px-5 py-3">
+                    <td colSpan={4} className="px-5 py-3">
                       <div className="h-3 bg-navy-700 rounded animate-pulse" />
                     </td>
                   </tr>
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-5 py-12 text-center">
+                  <td colSpan={4} className="px-5 py-12 text-center">
                     <p className="text-sentinel-muted font-mono text-sm">No events match your filters</p>
                   </td>
                 </tr>
-              ) : filtered.map((log, i) => (
-                <tr key={log.id} className={`table-row animate-fade-in stagger-${Math.min(i % 5 + 1, 5)}`}>
-                  <td className="px-5 py-3">
-                    <span className={`text-xs font-mono ${EVENT_COLORS[log.event_type] || 'text-sentinel-muted'}`}>
-                      {log.event_type?.replace(/_/g, ' ')}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3">
-                    <span className="text-xs font-mono text-sentinel-text">{log.action?.replace(/_/g, ' ')}</span>
-                  </td>
-                  <td className="px-5 py-3 hidden md:table-cell">
-                    <span className="text-xs font-mono text-sentinel-muted">
-                      {log.actor_id ? `${log.actor_id.slice(0, 8)}…` : '—'}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3 hidden lg:table-cell">
-                    <span className="text-xs font-mono text-sentinel-muted">{log.target_type || '—'}</span>
-                  </td>
-                  <td className="px-5 py-3">
-                    <span className="text-xs font-mono text-sentinel-muted" title={fmt(log.created_at)}>
-                      {fromNow(log.created_at)}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              ) : filtered.map((log, i) => {
+                const config = EVENT_LABELS[log.event_type]
+                const label  = config ? `${config.icon} ${config.label}` : log.event_type?.replace(/_/g,' ')
+                const color  = config?.color || 'text-sentinel-muted'
+                const detail = getDetail(log)
+
+                return (
+                  <tr key={log.id} className={`table-row animate-fade-in stagger-${Math.min(i % 5 + 1, 5)}`}>
+                    <td className="px-5 py-3 min-w-[200px]">
+                      <span className={`text-xs font-mono font-medium ${color}`}>{label}</span>
+                    </td>
+                    <td className="px-5 py-3 hidden md:table-cell max-w-xs">
+                      <span className="text-xs font-mono text-sentinel-muted truncate block" title={detail}>
+                        {detail}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 hidden lg:table-cell">
+                      <span className="text-xs font-mono text-sentinel-muted">
+                        {log.actor_id ? `${log.actor_id.slice(0, 8)}…` : 'System'}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3">
+                      <div>
+                        <span className="text-xs font-mono text-sentinel-muted" title={fmt(log.created_at)}>
+                          {fromNow(log.created_at)}
+                        </span>
+                        <p className="text-[10px] font-mono text-sentinel-muted/60 hidden lg:block">
+                          {fmt(log.created_at)}
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
