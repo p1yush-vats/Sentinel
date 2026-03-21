@@ -2,9 +2,10 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import {
   LayoutDashboard, Users, Clock, AlertTriangle, BarChart3,
-  Calendar, MessageSquare, ScrollText, Settings, LogOut, X
+  Calendar, MessageSquare, ScrollText, Settings, LogOut, Shield, X,
+  ArrowLeftRight
 } from 'lucide-react'
-import sentinelLogo from '../../img/sentinel.svg'
+
 const NAV = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/employees', icon: Users,           label: 'Employees' },
@@ -29,7 +30,7 @@ export default function Sidebar({ flagCount = 0, onClose }) {
       <div className="px-5 py-4 border-b border-sentinel-border flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-cyan-400/10 border border-cyan-400/30 flex items-center justify-center">
-            <img src={sentinelLogo} alt="Sentinel" className="w-full h-full object-contain" />
+            <Shield size={16} className="text-cyan-400" />
           </div>
           <div>
             <span className="font-display font-bold text-base text-sentinel-text tracking-wide">SENTINEL</span>
@@ -65,6 +66,17 @@ export default function Sidebar({ flagCount = 0, onClose }) {
           </NavLink>
         ))}
       </nav>
+
+      {/* Employee view toggle */}
+      <div className="px-3 pb-2">
+        <button
+          onClick={() => navigate('/my/dashboard')}
+          className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-mono border border-cyan-400/20 text-cyan-400 hover:bg-cyan-400/10 transition-all duration-200"
+        >
+          <ArrowLeftRight size={14} />
+          <span className="flex-1 text-left text-xs">Switch to Employee View</span>
+        </button>
+      </div>
 
       {/* User */}
       <div className="p-3 border-t border-sentinel-border shrink-0">

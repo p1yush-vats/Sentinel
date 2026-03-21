@@ -16,6 +16,7 @@ class Employee(Base):
     role          = Column(String(50),  nullable=False, default='employee')
     department    = Column(String(100), nullable=True)
     position      = Column(String(100), nullable=True)
+    gender        = Column(String(20), nullable=True)
     phone         = Column(String(20),  nullable=True)
     employee_code = Column(String(20),  nullable=True)
     avatar_url    = Column(Text,        nullable=True)
@@ -31,6 +32,7 @@ class Employee(Base):
             "role":          self.role,
             "department":    self.department,
             "position":      self.position,
+            "gender":        self.gender,
             "phone":         self.phone,
             "employee_code": self.employee_code,
             "avatar_url":    self.avatar_url,
