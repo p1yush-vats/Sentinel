@@ -42,8 +42,8 @@ def calculate_session_status(total_work_minutes: int, target_minutes: int = 400)
     if target_minutes == 0:
         return 'incomplete'
     pct = (total_work_minutes / target_minutes) * 100
-    if pct >= 90:   return 'completed'
-    elif pct >= 40: return 'partial'
+    if pct >= 75:   return 'completed'   # 300+ minutes = completed
+    elif pct >= 30: return 'partial'     # 120+ minutes = partial
     else:           return 'incomplete'
 
 
