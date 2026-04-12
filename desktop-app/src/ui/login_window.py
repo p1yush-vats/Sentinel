@@ -1,5 +1,6 @@
 """
-Login Window for SENTINEL Desktop App
+Login Window — SENTINEL Desktop App
+Redesigned CustomTkinter UI
 """
 import customtkinter as ctk
 from PIL import Image
@@ -21,238 +22,225 @@ def _load_ctk_image(filename: str, size: tuple) -> Optional[ctk.CTkImage]:
     return ctk.CTkImage(light_image=pil, dark_image=pil, size=size)
 
 
+# ── palette ──────────────────────────────────────────────────
+BG0  = "#0B1120"
+BG1  = "#0D1526"
+BG2  = "#111C2E"
+BG3  = "#1A2640"
+BORD = "#1E2D45"
+BORD2= "#243450"
+
+GREEN = "#10B981"
+BLUE  = "#60A5FA"
+RED   = "#EF4444"
+AMBER = "#F59E0B"
+
+T1 = "#E2E8F0"
+T2 = "#94A3B8"
+T3 = "#475569"
+T4 = "#2D3F55"
+
+
 class LoginWindow(ctk.CTk):
-    """Main login window"""
+    """
+    Full-screen login window with shield branding.
+    Calls on_login_success(user_dict, access_token) on success.
+    """
 
-    def __init__(self, on_login_success: Callable, api_base_url: str = "http://127.0.0.1:8000"):
+    def __init__(
+        self,
+        on_login_success: Callable,
+        api_base_url: str = "http://127.0.0.1:8000"
+    ):
         super().__init__()
-
-        self.on_login_success = on_login_success
-        self.api_base_url = api_base_url
-
-        self.title("SENTINEL - Login")
-        self.geometry("400x500")
-        self.resizable(False, False)
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
-        ico_path = _asset("sentinel.ico")
-        if ico_path.exists():
-            self.iconbitmap(str(ico_path))
+        self.on_login_success = on_login_success
+        self.api_base_url     = api_base_url
 
-        self._logo_img = None
+        self.title("SENTINEL — Login")
+        self.geometry("460x580")
+        self.resizable(False, False)
+        self.configure(fg_color=BG0)
 
-        self.center_window()
-        self.create_widgets()
+        ico = _asset("sentinel.ico")
+        if ico.exists():
+            self.iconbitmap(str(ico))
 
-    def center_window(self):
+        self._shield_img: Optional[ctk.CTkImage] = None
+        self._center()
+        self._build()
+
+    def _center(self):
         self.update_idletasks()
-        width = self.winfo_width()
-        height = self.winfo_height()
-        x = (self.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.winfo_screenheight() // 2) - (height // 2)
-        self.geometry(f'{width}x{height}+{x}+{y}')
+        w, h = 460, 580
+        x = (self.winfo_screenwidth()  - w) // 2
+        y = (self.winfo_screenheight() - h) // 2
+        self.geometry(f"{w}x{h}+{x}+{y}")
 
-    def create_widgets(self):
-        self._logo_img = _load_ctk_image("sentinel_shield.png", (72, 72))
+    def _build(self):
+        self._shield_img = _load_ctk_image("sentinel_shield.png", (64, 64))
 
-        container = ctk.CTkFrame(self, fg_color="transparent")
-        container.pack(fill="both", expand=True, padx=40, pady=40)
+        # outer card
+        card = ctk.CTkFrame(self, fg_color=BG1, corner_radius=16,
+                             border_color=BORD, border_width=1)
+        card.place(relx=.5, rely=.5, anchor="center", relwidth=.85)
 
-        if self._logo_img:
-            ctk.CTkLabel(container, image=self._logo_img, text="").pack(pady=(0, 8))
+        # ── logo ──
+        logo_frame = ctk.CTkFrame(card, fg_color="transparent")
+        logo_frame.pack(pady=(36, 20))
+
+        if self._shield_img:
+            ctk.CTkLabel(logo_frame, image=self._shield_img, text="").pack()
         else:
-            ctk.CTkLabel(
-                container,
-                text="🛡️",
-                font=("Arial", 48)
-            ).pack(pady=(0, 8))
+            shield_box = ctk.CTkFrame(logo_frame, width=64, height=64,
+                                       fg_color="#1E3A6E", corner_radius=14)
+            shield_box.pack()
+            shield_box.pack_propagate(False)
+            ctk.CTkLabel(shield_box, text="S", font=("Arial", 28, "bold"),
+                         text_color=BLUE).place(relx=.5, rely=.5, anchor="center")
 
-        title = ctk.CTkLabel(
-            container,
-            text="SENTINEL",
-            font=("Arial", 32, "bold"),
-            text_color="#3B82F6"
-        )
-        title.pack(pady=(0, 10))
+        ctk.CTkLabel(logo_frame, text="SENTINEL",
+                     font=("Arial", 26, "bold"), text_color=T1,
+                     ).pack(pady=(10, 2))
+        ctk.CTkLabel(logo_frame, text="Work integrity system",
+                     font=("Arial", 12), text_color=T3).pack()
 
-        subtitle = ctk.CTkLabel(
-            container,
-            text="Work Integrity System",
-            font=("Arial", 14),
-            text_color="gray"
-        )
-        subtitle.pack(pady=(0, 40))
+        # ── form ──
+        form = ctk.CTkFrame(card, fg_color="transparent")
+        form.pack(fill="x", padx=32, pady=(8, 0))
 
-        self.email_label = ctk.CTkLabel(
-            container,
-            text="Email",
-            font=("Arial", 12)
-        )
-        self.email_label.pack(anchor="w", pady=(0, 5))
-
+        ctk.CTkLabel(form, text="Email", font=("Arial", 12),
+                     text_color=T3, anchor="w").pack(fill="x", pady=(0, 5))
         self.email_entry = ctk.CTkEntry(
-            container,
-            placeholder_text="Enter your email",
-            height=45,
-            font=("Arial", 12)
+            form, placeholder_text="you@company.com",
+            height=42, corner_radius=8,
+            fg_color=BG2, border_color=BORD2, border_width=1,
+            text_color=T1, placeholder_text_color=T4,
+            font=("Arial", 13)
         )
-        self.email_entry.pack(fill="x", pady=(0, 20))
+        self.email_entry.pack(fill="x", pady=(0, 14))
 
-        self.password_label = ctk.CTkLabel(
-            container,
-            text="Password",
-            font=("Arial", 12)
-        )
-        self.password_label.pack(anchor="w", pady=(0, 5))
-
+        ctk.CTkLabel(form, text="Password", font=("Arial", 12),
+                     text_color=T3, anchor="w").pack(fill="x", pady=(0, 5))
         self.password_entry = ctk.CTkEntry(
-            container,
-            placeholder_text="Enter your password",
-            show="●",
-            height=45,
-            font=("Arial", 12)
+            form, placeholder_text="••••••••",
+            show="●", height=42, corner_radius=8,
+            fg_color=BG2, border_color=BORD2, border_width=1,
+            text_color=T1, placeholder_text_color=T4,
+            font=("Arial", 13)
         )
-        self.password_entry.pack(fill="x", pady=(0, 10))
+        self.password_entry.pack(fill="x", pady=(0, 14))
 
+        # remember me
         self.remember_var = ctk.BooleanVar(value=False)
-        self.remember_check = ctk.CTkCheckBox(
-            container,
-            text="Remember me",
-            variable=self.remember_var,
-            font=("Arial", 11)
+        ctk.CTkCheckBox(
+            form, text="Remember me", variable=self.remember_var,
+            font=("Arial", 12), text_color=T3,
+            fg_color=BLUE, hover_color="#2563EB",
+            checkmark_color="white", corner_radius=4,
+            border_color=BORD2
+        ).pack(anchor="w", pady=(0, 22))
+
+        # login button
+        self.login_btn = ctk.CTkButton(
+            form, text="Login", command=self._handle_login,
+            height=46, corner_radius=10,
+            fg_color="#1E3A6E", hover_color="#16305A",
+            text_color=BLUE, font=("Arial", 14, "bold")
         )
-        self.remember_check.pack(anchor="w", pady=(0, 30))
+        self.login_btn.pack(fill="x", pady=(0, 12))
 
-        self.login_button = ctk.CTkButton(
-            container,
-            text="Login",
-            command=self.handle_login,
-            height=45,
-            font=("Arial", 14, "bold"),
-            fg_color="#3B82F6",
-            hover_color="#2563EB"
+        # status label
+        self.status_lbl = ctk.CTkLabel(
+            form, text="", font=("Arial", 11),
+            text_color=RED, wraplength=340
         )
-        self.login_button.pack(fill="x", pady=(0, 15))
+        self.status_lbl.pack(pady=(0, 4))
 
-        self.status_label = ctk.CTkLabel(
-            container,
-            text="",
-            font=("Arial", 11),
-            text_color="red"
-        )
-        self.status_label.pack(pady=(0, 10))
+        # api hint
+        ctk.CTkLabel(card, text=f"API: {self.api_base_url}",
+                     font=("Arial", 9), text_color=T4
+                     ).pack(pady=(4, 6))
 
-        api_info = ctk.CTkLabel(
-            container,
-            text=f"API: {self.api_base_url}",
-            font=("Arial", 9),
-            text_color="gray"
-        )
-        api_info.pack(pady=(5, 0))
+        # version
+        ctk.CTkLabel(card, text="v1.0.0",
+                     font=("Arial", 10), text_color=T4
+                     ).pack(pady=(0, 20))
 
-        version_label = ctk.CTkLabel(
-            container,
-            text="Version 1.0.0",
-            font=("Arial", 10),
-            text_color="gray"
-        )
-        version_label.pack(side="bottom", pady=(20, 0))
+        # key bindings
+        self.email_entry.bind("<Return>",
+                               lambda _: self.password_entry.focus())
+        self.password_entry.bind("<Return>",
+                                  lambda _: self._handle_login())
 
-        self.password_entry.bind("<Return>", lambda e: self.handle_login())
-        self.email_entry.bind("<Return>", lambda e: self.password_entry.focus())
+    # ─────────────────────────────────────────────────────────
 
-    def handle_login(self):
-        email = self.email_entry.get().strip()
+    def _handle_login(self):
+        email    = self.email_entry.get().strip()
         password = self.password_entry.get()
 
         if not email:
-            self.show_error("Please enter your email")
+            self._show_error("Please enter your email")
             return
-
         if not password:
-            self.show_error("Please enter your password")
+            self._show_error("Please enter your password")
             return
 
-        self.login_button.configure(state="disabled", text="Logging in...")
-        self.status_label.configure(text="Authenticating...", text_color="gray")
+        self.login_btn.configure(state="disabled", text="Logging in…")
+        self.status_lbl.configure(text="Authenticating…", text_color=T3)
 
-        thread = threading.Thread(
-            target=self.do_login,
-            args=(email, password),
-            daemon=True
-        )
-        thread.start()
+        threading.Thread(
+            target=self._do_login, args=(email, password), daemon=True
+        ).start()
 
-    def do_login(self, email: str, password: str):
+    def _do_login(self, email: str, password: str):
         try:
-            url = f"{self.api_base_url}/api/v1/auth/login"
-
             with httpx.Client(timeout=10.0) as client:
-                response = client.post(
-                    url,
+                resp = client.post(
+                    f"{self.api_base_url}/api/v1/auth/login",
                     json={"email": email, "password": password}
                 )
-
-                if response.status_code == 200:
-                    data = response.json()
-                    self.after(0, lambda: self.login_success(data))
-                else:
-                    error_msg = "Login failed"
-                    try:
-                        error_data = response.json()
-                        error_msg = error_data.get("detail", error_msg)
-                    except:
-                        pass
-                    self.after(0, lambda: self.login_failed(error_msg))
+            if resp.status_code == 200:
+                data = resp.json()
+                self.after(0, lambda: self._login_success(data))
+            else:
+                try:
+                    msg = resp.json().get("detail", "Login failed")
+                except Exception:
+                    msg = f"Login failed (HTTP {resp.status_code})"
+                self.after(0, lambda: self._login_failed(msg))
 
         except httpx.ConnectError:
-            self.after(0, lambda: self.login_failed(
-                f"Cannot connect to backend at {self.api_base_url}\n"
-                "Make sure the backend server is running!"
+            self.after(0, lambda: self._login_failed(
+                f"Cannot connect to backend.\n{self.api_base_url}"
             ))
         except Exception as e:
-            self.after(0, lambda: self.login_failed(f"Error: {str(e)}"))
+            self.after(0, lambda: self._login_failed(str(e)))
 
-    def login_success(self, data: dict):
-        if self.remember_var.get():
-            self.save_credentials(data["user"]["email"], data["access_token"])
-
-        self.status_label.configure(
-            text=f"Welcome, {data['user']['full_name']}!",
-            text_color="green"
+    def _login_success(self, data: dict):
+        self.status_lbl.configure(
+            text=f"Welcome, {data['user']['full_name']}!", text_color=GREEN
         )
+        self.after(900, lambda: self.on_login_success(
+            data["user"], data["access_token"]
+        ))
+        self.after(1400, self.destroy)
 
-        self.after(1000, lambda: self.on_login_success(data["user"], data["access_token"]))
-        self.after(1500, self.destroy)
+    def _login_failed(self, msg: str):
+        self._show_error(msg)
+        self.login_btn.configure(state="normal", text="Login")
 
-    def login_failed(self, error_msg: str):
-        self.show_error(error_msg)
-        self.login_button.configure(state="normal", text="Login")
-
-    def show_error(self, message: str):
-        self.status_label.configure(text=message, text_color="red")
-        self.after(5000, lambda: self.status_label.configure(text=""))
-
-    def save_credentials(self, email: str, token: str):
-        print(f"Saving credentials for: {email}")
-
-    def load_saved_credentials(self):
-        pass
-
-
-def main():
-    def on_success(user, token):
-        print(f"\n✅ Login successful!")
-        print(f"User: {user['email']}")
-        print(f"Name: {user['full_name']}")
-        print(f"Role: {user['role']}")
-        print(f"Token: {token[:50]}...")
-
-    app = LoginWindow(on_login_success=on_success)
-    app.mainloop()
+    def _show_error(self, msg: str):
+        self.status_lbl.configure(text=msg, text_color=RED)
+        self.after(6000, lambda: self.status_lbl.configure(text=""))
 
 
 if __name__ == "__main__":
-    main()
+    def _on_success(user, token):
+        print(f"Login OK — {user['email']}")
+
+    app = LoginWindow(on_login_success=_on_success)
+    app.mainloop()
