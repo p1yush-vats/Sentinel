@@ -202,7 +202,7 @@ class MainWindow(ctk.CTk):
         # Loading earlier (e.g. in __init__) binds the PhotoImage to the
         # previous Tk instance (the login window), which is destroyed before
         # MainWindow opens, causing "pyimage doesn't exist" TclError.
-        self._logo_img = _load_ctk_image("sentinel_shield.png", (22, 22))
+        self._logo_img = None
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
         self._build_sidebar()
@@ -225,12 +225,8 @@ class MainWindow(ctk.CTk):
                            fg_color="#1E3A6E", corner_radius=8)
         sh.pack(side="left", padx=(0, 10))
         sh.pack_propagate(False)
-        if self._logo_img:
-            ctk.CTkLabel(sh, image=self._logo_img, text=""
-                         ).place(relx=0.5, rely=0.5, anchor="center")
-        else:
-            ctk.CTkLabel(sh, text="S", font=("Arial", 14, "bold"),
-                         text_color=BLUE).place(relx=0.5, rely=0.5, anchor="center")
+        ctk.CTkLabel(sh, text="S", font=("Arial", 14, "bold"),
+                     text_color=BLUE).place(relx=0.5, rely=0.5, anchor="center")
         ctk.CTkLabel(inner, text="SENTINEL",
                      font=("Arial", 15, "bold"), text_color=T1).pack(side="left")
 

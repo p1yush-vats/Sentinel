@@ -267,20 +267,20 @@ class SentinelApp:
             access_token=access_token, refresh_token="", user_data=user)
         print(f"Login OK: {user.get('full_name')} ({user.get('role')})")
         self._init_components()
-        # Withdraw login window BEFORE showing main so there's no
-        # Tk root destruction mid-flight. MainWindow creates its own
-        # CTk root. Login window destroy() happens after mainloop() exits.
+        
+        # Withdraw FIRST, update so Tk processes it, THEN show main
         if self.login_window:
             self.login_window.withdraw()
+            self.login_window.update()   # <-- this is the key line
+        
         self._show_main()
-        # After main window closes (mainloop returns), clean up login window
+        
         if self.login_window:
             try:
                 self.login_window.destroy()
             except Exception:
                 pass
             self.login_window = None
-
     def _logout(self):
         print("Logging out…")
         self._stop_detection()

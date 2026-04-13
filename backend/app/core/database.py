@@ -20,7 +20,8 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool
 from .config import settings
-
+import itertools
+_stmt_counter = itertools.count()
 
 def _make_engine():
     """
@@ -42,7 +43,7 @@ def _make_engine():
         # Give every prepared statement a globally unique name so that
         # even if pgbouncer leaks one across a connection, it won't
         # collide with the next request's statement.
-        "prepared_statement_name_func": lambda: f"__sentinel_{id(object())}__",
+        "prepared_statement_name_func": lambda: f"__s_{next(_stmt_counter)}__",
         "server_settings": {
             "jit": "off",
             "application_name": "sentinel_backend",
