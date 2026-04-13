@@ -1,6 +1,15 @@
 """
 main.py — SENTINEL Desktop App
-Redesigned entry point wiring the new UI into existing backend logic.
+Entry point. Wires SentinelApp business logic into the new UI.
+
+FIXES:
+  - All UI callback references updated for new main_window.py API
+  - API_BASE_URL defaults to localhost
+  - _conflict_dialog and _session_recovery_dialog updated palette
+  - Detection loop feedback calls correct main_window methods
+  - Session end properly calls set_risk_score after ending
+  - All .after(0, lambda) closures capture variables correctly
+  - on_sync_complete / on_sync_error correctly call set_sync_status
 """
 
 import sys
@@ -29,15 +38,24 @@ from ui.main_window   import MainWindow
 from core.config      import Config
 from core.time_engine import SessionState
 from auth.jwt_handler import JWTHandler
-from core.session_manager      import SessionManager
-from storage.local_db          import LocalDB
-from sync.sync_client          import SyncClient
-from detection.input_collector import InputCollector
+from core.session_manager        import SessionManager
+from storage.local_db            import LocalDB
+from sync.sync_client            import SyncClient
+from detection.input_collector   import InputCollector
 from detection.abnormality_detector  import AbnormalityDetector, Abnormality
 from detection.abnormality_aggregator import AbnormalityAggregator
 import customtkinter as ctk
 
 IST = pytz.timezone("Asia/Kolkata")
+
+# ── Palette (shared with dialogs) ────────────────────────────
+BG0   = "#0B1120"; BG1 = "#0D1526"; BG2 = "#111C2E"
+BG3   = "#1A2640"; BORD = "#1E2D45"
+GREEN = "#10B981"; AMBER = "#F59E0B"; RED = "#EF4444"; BLUE = "#60A5FA"
+T1 = "#E2E8F0";    T2 = "#94A3B8";   T3 = "#475569"
+G_BG = "#0B1F14";  G_BD = "#0D3320"
+A_BG = "#1A1400";  A_BD = "#3B2C00"
+R_BG = "#1A0D0D";  R_BD = "#3B1010"
 
 
 def _asset(filename: str) -> Path:
@@ -65,8 +83,7 @@ def parse_datetime_ist(dt_string: str) -> datetime:
         else:
             dt = dt.astimezone(IST)
         return dt
-    except Exception as e:
-        print(f"Warning parsing datetime '{dt_string}': {e}")
+    except Exception:
         try:
             clean = dt_string.split("+")[0].split(".")[0]
             dt = datetime.strptime(clean, "%Y-%m-%d %H:%M:%S")
@@ -76,30 +93,14 @@ def parse_datetime_ist(dt_string: str) -> datetime:
 
 
 # ─────────────────────────────────────────────────────────────
-# PALETTE (matches main_window.py)
-# ─────────────────────────────────────────────────────────────
-BG1   = "#0D1526"
-BORD  = "#1E2D45"
-GREEN = "#10B981"
-AMBER = "#F59E0B"
-RED   = "#EF4444"
-BLUE  = "#60A5FA"
-T1    = "#E2E8F0"
-T2    = "#94A3B8"
-T3    = "#475569"
-G_BG  = "#0B1F14";  G_BD = "#0D3320"
-A_BG  = "#1A1400";  A_BD = "#3B2C00"
-R_BG  = "#1A0D0D";  R_BD = "#3B1010"
-
-
 class SentinelApp:
 
     def __init__(self):
         self.jwt_handler = JWTHandler(Config.DB_DIR)
         self.local_db    = LocalDB(Config.DB_PATH)
 
-        self.login_window: Optional[LoginWindow]  = None
-        self.main_window:  Optional[MainWindow]   = None
+        self.login_window: Optional[LoginWindow] = None
+        self.main_window:  Optional[MainWindow]  = None
 
         self.session_manager:        Optional[SessionManager]        = None
         self.sync_client:            Optional[SyncClient]            = None
@@ -124,10 +125,11 @@ class SentinelApp:
     # ENTRY POINT
     # ─────────────────────────────────────────────────────────
     def run(self):
-        print("SENTINEL Desktop App Starting...")
-        print(f"  Version : 1.0.0")
-        print(f"  API     : {Config.API_BASE_URL}")
-        print(f"  DB      : {Config.DB_PATH}")
+        print("=" * 50)
+        print("  SENTINEL Desktop App v1.0.0")
+        print(f"  API: {Config.API_BASE_URL}")
+        print(f"  DB : {Config.DB_PATH}")
+        print("=" * 50)
 
         if self.jwt_handler.has_saved_tokens() and self.jwt_handler.is_token_valid():
             self.user         = self.jwt_handler.get_user_data()
@@ -135,6 +137,7 @@ class SentinelApp:
 
             if self.user and self.access_token and "id" in self.user:
                 try:
+                    print(f"Auto-login: {self.user.get('full_name')} ({self.user.get('role')})")
                     self._init_components()
                     incomplete = self._check_incomplete_session()
                     if incomplete:
@@ -143,7 +146,8 @@ class SentinelApp:
                         self._show_main()
                     return
                 except Exception as e:
-                    print(f"Error loading saved session: {e}")
+                    print(f"Auto-login error: {e}")
+                    import traceback; traceback.print_exc()
                     self.jwt_handler.clear_tokens()
             else:
                 self.jwt_handler.clear_tokens()
@@ -159,11 +163,15 @@ class SentinelApp:
             if not session:
                 return None
             start = parse_datetime_ist(session["start_time"])
-            if (now_ist() - start) < timedelta(
-                    hours=Config.SESSION_RECOVERY_WINDOW_HOURS):
+            age   = now_ist() - start
+            if age < timedelta(hours=Config.SESSION_RECOVERY_WINDOW_HOURS):
+                print(f"Found incomplete session from {age.seconds//60} min ago")
                 return session
+            # Too old — abandon
             self.local_db.update_session(
-                session_id=session["id"], status="abandoned", end_time=now_ist())
+                session_id=session["id"],
+                status="abandoned",
+                end_time=now_ist())
             return None
         except Exception as e:
             print(f"Error checking incomplete session: {e}")
@@ -175,7 +183,7 @@ class SentinelApp:
 
         dlg = ctk.CTkToplevel(root)
         dlg.title("Session Recovery")
-        dlg.geometry("540x380")
+        dlg.geometry("540x360")
         dlg.resizable(False, False)
         dlg.configure(fg_color=BG1)
         dlg.attributes("-topmost", True)
@@ -183,83 +191,63 @@ class SentinelApp:
         _set_icon(dlg)
         dlg.update_idletasks()
         dlg.geometry(
-            f"540x380"
+            f"540x360"
             f"+{(dlg.winfo_screenwidth()-540)//2}"
-            f"+{(dlg.winfo_screenheight()-380)//2}")
+            f"+{(dlg.winfo_screenheight()-360)//2}")
 
-        container = ctk.CTkFrame(dlg, fg_color="#111C2E")
+        container = ctk.CTkFrame(dlg, fg_color=BG2)
         container.pack(fill="both", expand=True, padx=28, pady=28)
 
-        # header icon
-        ic = ctk.CTkFrame(container, width=44, height=44,
-                           fg_color=A_BG, corner_radius=10)
-        ic.pack(pady=(0, 14))
-        ic.pack_propagate(False)
-        ctk.CTkLabel(ic, text="↺", font=("Arial", 20, "bold"),
-                     text_color=AMBER).place(relx=.5, rely=.5, anchor="center")
-
-        ctk.CTkLabel(container, text="Incomplete session detected",
-                     font=("Arial", 16, "bold"), text_color=T1).pack(pady=(0, 8))
+        ctk.CTkLabel(container, text="Incomplete session found",
+                     font=("Arial", 16, "bold"), text_color=AMBER
+                     ).pack(pady=(0, 12))
 
         try:
             start_dt = parse_datetime_ist(session.get("start_time", ""))
             display  = start_dt.strftime("%I:%M %p on %B %d")
         except Exception:
-            display  = session.get("start_time", "Unknown")
+            display  = session.get("start_time", "Unknown time")
 
         ctk.CTkLabel(
             container,
-            text=f"An unfinished session was found from:\n{display}",
+            text=f"Found an active session from:\n{display}\n"
+                 f"Work logged: {session.get('total_work_minutes', 0)} min",
             font=("Arial", 12), text_color=T2, justify="center"
-        ).pack(pady=(0, 16))
-
-        # stats row
-        stats_f = ctk.CTkFrame(container, fg_color="#1A2640", corner_radius=10)
-        stats_f.pack(fill="x", pady=(0, 24))
-        stats_f.grid_columnconfigure((0, 1, 2), weight=1)
-        for i, (k, v) in enumerate([
-            ("Started",     display.split(" on ")[0] if " on " in display else display),
-            ("Work logged", f"{session.get('total_work_minutes', 0)} min"),
-            ("Status",      "Active"),
-        ]):
-            ctk.CTkLabel(stats_f, text=v, font=("Arial", 15, "bold"),
-                         text_color=T1).grid(row=0, column=i, pady=(14, 3))
-            ctk.CTkLabel(stats_f, text=k, font=("Arial", 9),
-                         text_color=T3).grid(row=1, column=i, pady=(0, 14))
+        ).pack(pady=(0, 24))
 
         btn_f = ctk.CTkFrame(container, fg_color="transparent")
         btn_f.pack(fill="x")
         btn_f.grid_columnconfigure((0, 1), weight=1)
 
-        def continue_session():
+        def _continue():
             self.current_session_id  = session["id"]
             self._work_segment_start = now_ist()
             dlg.destroy()
             root.destroy()
             self._show_main()
 
-        def start_fresh():
+        def _fresh():
             self.local_db.update_session(
-                session_id=session["id"], status="abandoned", end_time=now_ist())
+                session_id=session["id"],
+                status="abandoned",
+                end_time=now_ist())
             dlg.destroy()
             root.destroy()
             self._show_main()
 
-        ctk.CTkButton(btn_f, text="Continue session",
-                      command=continue_session, height=46,
-                      font=("Arial", 13, "bold"), corner_radius=10,
+        ctk.CTkButton(btn_f, text="Continue session", command=_continue,
+                      height=46, font=("Arial", 13, "bold"), corner_radius=10,
                       fg_color=G_BG, hover_color="#0F2A1A",
                       text_color=GREEN, border_color=G_BD, border_width=1
                       ).grid(row=0, column=0, sticky="ew", padx=(0, 8))
 
-        ctk.CTkButton(btn_f, text="Start fresh",
-                      command=start_fresh, height=46,
-                      font=("Arial", 13, "bold"), corner_radius=10,
-                      fg_color="#1A2640", hover_color="#243450",
+        ctk.CTkButton(btn_f, text="Start fresh", command=_fresh,
+                      height=46, font=("Arial", 13, "bold"), corner_radius=10,
+                      fg_color=BG3, hover_color="#243450",
                       text_color=T2, border_color=BORD, border_width=1
                       ).grid(row=0, column=1, sticky="ew", padx=(8, 0))
 
-        dlg.protocol("WM_DELETE_WINDOW", start_fresh)
+        dlg.protocol("WM_DELETE_WINDOW", _fresh)
         root.mainloop()
 
     # ─────────────────────────────────────────────────────────
@@ -277,9 +265,21 @@ class SentinelApp:
         self.access_token = access_token
         self.jwt_handler.save_tokens(
             access_token=access_token, refresh_token="", user_data=user)
-        print(f"Login OK — {user['full_name']} ({user['role']})")
+        print(f"Login OK: {user.get('full_name')} ({user.get('role')})")
         self._init_components()
+        # Withdraw login window BEFORE showing main so there's no
+        # Tk root destruction mid-flight. MainWindow creates its own
+        # CTk root. Login window destroy() happens after mainloop() exits.
+        if self.login_window:
+            self.login_window.withdraw()
         self._show_main()
+        # After main window closes (mainloop returns), clean up login window
+        if self.login_window:
+            try:
+                self.login_window.destroy()
+            except Exception:
+                pass
+            self.login_window = None
 
     def _logout(self):
         print("Logging out…")
@@ -288,15 +288,21 @@ class SentinelApp:
             self.sync_client.stop_background_flush()
         self.jwt_handler.clear_tokens()
         if self.main_window:
-            self.main_window.destroy()
+            try:
+                self.main_window.destroy()
+            except Exception:
+                pass
+            self.main_window = None
         self.user               = None
         self.access_token       = None
         self.current_session_id = None
         self.session_manager    = None
         self.sync_client        = None
+        print("Logged out.")
         self._show_login()
 
     def _init_components(self):
+        print("Initializing components…")
         self.session_manager = SessionManager(
             api_base_url=Config.API_BASE_URL,
             access_token=self.access_token,
@@ -322,6 +328,7 @@ class SentinelApp:
             on_abnormality_detected=self._on_abnormality_detected,
             confidence_threshold=Config.ABNORMALITY_CONFIDENCE_THRESHOLD
         )
+        print("Components ready.")
 
     def _show_main(self):
         self.main_window = MainWindow(
@@ -329,6 +336,7 @@ class SentinelApp:
             access_token=self.access_token,
             time_engine=self.session_manager.time_engine
         )
+        # Wire all callbacks
         self.main_window.on_start_session = self._start_session
         self.main_window.on_end_session   = self._end_session
         self.main_window.on_take_break    = self._take_break
@@ -352,16 +360,18 @@ class SentinelApp:
             try:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                result = loop.run_until_complete(self.session_manager.start_session())
+                result = loop.run_until_complete(
+                    self.session_manager.start_session())
                 loop.close()
 
                 if result.get("conflict"):
                     existing = result.get("existing_session", {})
                     if self.main_window:
                         self.main_window.after(
-                            0, lambda: self._conflict_dialog(existing))
+                            0, lambda e=existing: self._conflict_dialog(e))
                     return
 
+                # Persist to local DB
                 existing_local = self.local_db.get_session(self.current_session_id)
                 if not existing_local:
                     self.local_db.create_session(
@@ -370,10 +380,9 @@ class SentinelApp:
                         start_time=now_ist(),
                         backend_session_id=result.get("backend_session_id")
                     )
-                else:
-                    if result.get("backend_session_id"):
-                        self.local_db.update_session(
-                            session_id=self.current_session_id, status="active")
+                elif result.get("backend_session_id"):
+                    self.local_db.update_session(
+                        session_id=self.current_session_id, status="active")
 
                 self._work_segment_start = now_ist()
                 self._hourly_metrics     = {}
@@ -384,16 +393,14 @@ class SentinelApp:
                     sync_client=self.sync_client
                 )
 
+                ts = now_ist().strftime("%I:%M %p")
+                synced = result.get("synced", False)
                 if self.main_window:
-                    self.main_window.after(0, lambda: (
+                    self.main_window.after(0, lambda t=ts, s=synced: (
                         self.main_window.add_feed_item(
                             "info", "Session started",
-                            f"Detection pipeline active · "
-                            f"{now_ist().strftime('%I:%M %p')}",
-                            "info"
-                        ),
-                        self.main_window.set_sync_status(
-                            True, now_ist().strftime("%I:%M %p"))
+                            f"Detection active · {t}", "info"),
+                        self.main_window.set_sync_status(s, t)
                     ))
 
                 self._start_detection()
@@ -417,7 +424,7 @@ class SentinelApp:
             self.abnormality_aggregator.flush()
             summary = self.abnormality_aggregator.get_summary()
             if summary:
-                print(f"Abnormality summary — {len(summary)} type(s)")
+                print(f"Abnormality summary: {len(summary)} type(s)")
             self.abnormality_aggregator = None
 
         try:
@@ -429,24 +436,26 @@ class SentinelApp:
             try:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                summary = loop.run_until_complete(self.session_manager.end_session())
+                summary = loop.run_until_complete(
+                    self.session_manager.end_session())
                 loop.close()
 
                 risk = self.abnormality_detector.get_risk_score()
+
                 if self.current_session_id:
                     self.local_db.update_session(
                         session_id=self.current_session_id,
                         end_time=now_ist(),
-                        total_work_minutes=summary["work_minutes"],
-                        total_break_minutes=summary["break_minutes"],
-                        lunch_taken=summary["lunch_taken"],
+                        total_work_minutes=summary.get("work_minutes", 0),
+                        total_break_minutes=summary.get("break_minutes", 0),
+                        lunch_taken=summary.get("lunch_taken", False),
                         status="completed",
                         risk_score=risk
                     )
 
                 if self.main_window:
                     self.main_window.after(
-                        0, lambda: self.main_window.show_session_summary(summary))
+                        0, lambda s=summary: self.main_window.show_session_summary(s))
                     self.main_window.after(
                         0, lambda r=risk: self.main_window.set_risk_score(r))
 
@@ -473,8 +482,14 @@ class SentinelApp:
             self.session_manager.take_break()
             self._break_segment_start = now_ist()
             self._stop_detection()
+            print("Break started")
         except Exception as e:
             print(f"Break error: {e}")
+            if self.main_window:
+                ts = now_ist().strftime("%I:%M %p")
+                self.main_window.after(
+                    0, lambda t=ts: self.main_window.add_feed_item(
+                        "crit", "Break failed", str(e), t))
 
     def _end_break(self):
         try:
@@ -485,6 +500,7 @@ class SentinelApp:
             self.session_manager.end_break()
             self._work_segment_start = now_ist()
             self._start_detection()
+            print("Break ended, resumed work")
         except Exception as e:
             print(f"End break error: {e}")
 
@@ -496,8 +512,14 @@ class SentinelApp:
             self.session_manager.take_lunch()
             self._lunch_segment_start = now_ist()
             self._stop_detection()
+            print("Lunch started")
         except Exception as e:
             print(f"Lunch error: {e}")
+            if self.main_window:
+                ts = now_ist().strftime("%I:%M %p")
+                self.main_window.after(
+                    0, lambda t=ts: self.main_window.add_feed_item(
+                        "crit", "Lunch failed", str(e), t))
 
     def _end_lunch(self):
         try:
@@ -507,6 +529,7 @@ class SentinelApp:
             self.session_manager.end_lunch()
             self._work_segment_start = now_ist()
             self._start_detection()
+            print("Lunch ended, resumed work")
         except Exception as e:
             print(f"End lunch error: {e}")
 
@@ -521,14 +544,17 @@ class SentinelApp:
         self.detection_task = threading.Thread(
             target=self._detection_loop, daemon=True)
         self.detection_task.start()
+        print("Detection pipeline started")
 
     def _stop_detection(self):
         if not self.detection_running:
             return
         self.detection_running = False
         self.input_collector.stop_collecting()
+        print("Detection pipeline stopped")
 
     def _detection_loop(self):
+        """Runs every 30s. Analyzes behavior, syncs session state."""
         interval = 30
         while self.detection_running:
             try:
@@ -548,21 +574,20 @@ class SentinelApp:
                 if abnormalities:
                     for abn in abnormalities:
                         self._save_to_aggregator(abn)
-
                     risk = self.abnormality_detector.get_risk_score()
                     if self.main_window:
                         self.main_window.after(
                             0, lambda r=risk: self.main_window.set_risk_score(r))
                 else:
-                    # green "all clear" pulse every clean cycle
+                    # Clean cycle — add green pulse to feed
+                    ts = now_ist().strftime("%I:%M %p")
                     if self.main_window:
-                        ts = now_ist().strftime("%I:%M %p")
                         self.main_window.after(
                             0, lambda t=ts: self.main_window.add_feed_item(
                                 "ok", "Analysis clean",
                                 f"No abnormalities detected · {t}", "OK"))
 
-                # periodic session sync
+                # Session state sync every 30s
                 if self.session_manager.backend_session_id:
                     def _sync():
                         try:
@@ -572,10 +597,10 @@ class SentinelApp:
                                 self.session_manager.sync_session_state())
                             loop.close()
                             if ok and self.main_window:
-                                ts = now_ist().strftime("%I:%M %p")
+                                t = now_ist().strftime("%I:%M %p")
                                 self.main_window.after(
-                                    0, lambda t=ts:
-                                    self.main_window.set_sync_status(True, t))
+                                    0, lambda ts=t:
+                                    self.main_window.set_sync_status(True, ts))
                         except Exception as e:
                             print(f"Session sync error: {e}")
                     threading.Thread(target=_sync, daemon=True).start()
@@ -586,17 +611,22 @@ class SentinelApp:
 
             time.sleep(interval)
 
+        print("Detection loop stopped")
+
     # ─────────────────────────────────────────────────────────
     # CALLBACKS
     # ─────────────────────────────────────────────────────────
     def _on_state_change(self, state, data):
+        """Called by TimeEngine when session state changes."""
         if self.main_window:
             self.main_window.after(
-                0, lambda: self.main_window.update_state_ui(state, data))
+                0, lambda s=state, d=data:
+                self.main_window.update_state_ui(s, d))
 
-    def _on_sync_complete(self, summary):
-        n = summary.get("sessions_synced", 0) + summary.get("abnormalities_synced", 0)
-        print(f"Sync complete — {n} record(s) pushed")
+    def _on_sync_complete(self, summary: dict):
+        n = (summary.get("sessions_synced", 0) +
+             summary.get("abnormalities_synced", 0))
+        print(f"Sync complete — {n} record(s)")
         if self.main_window:
             ts = now_ist().strftime("%I:%M %p")
             self.main_window.after(
@@ -610,8 +640,9 @@ class SentinelApp:
                 0, lambda t=ts: self.main_window.set_sync_status(False, t))
 
     def _on_pattern_detected(self, pattern: dict):
+        """Called by InputCollector on real-time pattern hits."""
         pt         = pattern.get("type", "")
-        confidence = pattern.get("confidence", 0)
+        confidence = pattern.get("confidence", 0.0)
         details    = pattern.get("details", "")
 
         _MAP = {
@@ -625,14 +656,15 @@ class SentinelApp:
             "clock_in_out":     "clock_in_clock_out",
         }
         abn_type = _MAP.get(pt)
-        if abn_type and confidence >= self.abnormality_detector.confidence_threshold:
-            if self.abnormality_aggregator:
-                self.abnormality_aggregator.add_detection(
-                    abnormality_type=abn_type,
-                    confidence=confidence,
-                    timestamp=datetime.now(),
-                    description=details
-                )
+        if (abn_type
+                and confidence >= self.abnormality_detector.confidence_threshold
+                and self.abnormality_aggregator):
+            self.abnormality_aggregator.add_detection(
+                abnormality_type=abn_type,
+                confidence=confidence,
+                timestamp=datetime.now(),
+                description=details
+            )
 
         _KIND = {
             "large_paste": "warn", "rapid_paste": "warn",
@@ -642,15 +674,17 @@ class SentinelApp:
         }
         kind  = _KIND.get(pt, "info")
         title = pt.replace("_", " ").title()
-        meta  = (f"{details[:60]} · {now_ist().strftime('%I:%M %p')}"
-                 if details else now_ist().strftime("%I:%M %p"))
+        ts    = now_ist().strftime("%I:%M %p")
+        meta  = f"{details[:60]} · {ts}" if details else ts
         badge = f"{confidence:.0%}"
 
         if self.main_window:
             self.main_window.after(
-                0, lambda: self.main_window.add_feed_item(kind, title, meta, badge))
+                0, lambda k=kind, ti=title, m=meta, b=badge:
+                self.main_window.add_feed_item(k, ti, m, b))
 
     def _on_abnormality_detected(self, abnormality: Abnormality):
+        """Called by AbnormalityDetector — adds to feed and updates risk."""
         abn_label = (
             abnormality.abnormality_type.value
             if hasattr(abnormality.abnormality_type, "value")
@@ -660,16 +694,17 @@ class SentinelApp:
 
         _HIGH = {"mechanical_typing", "mouse_jiggler", "clock_in_clock_out",
                  "superhuman_speed", "suspicious_paste"}
-        kind  = "crit" if abn_label in _HIGH and conf >= 0.9 else "warn"
+        kind  = "crit" if (abn_label in _HIGH and conf >= 0.9) else "warn"
         title = abn_label.replace("_", " ").title()
         desc  = abnormality.metadata.get("description", "")
-        meta  = (f"{desc[:60]} · {now_ist().strftime('%I:%M %p')}"
-                 if desc else now_ist().strftime("%I:%M %p"))
+        ts    = now_ist().strftime("%I:%M %p")
+        meta  = f"{desc[:60]} · {ts}" if desc else ts
         badge = f"{conf:.0%}"
 
         if self.main_window:
             self.main_window.after(
-                0, lambda: self.main_window.add_feed_item(kind, title, meta, badge))
+                0, lambda k=kind, ti=title, m=meta, b=badge:
+                self.main_window.add_feed_item(k, ti, m, b))
             risk = self.abnormality_detector.get_risk_score()
             self.main_window.after(
                 0, lambda r=risk: self.main_window.set_risk_score(r))
@@ -712,6 +747,7 @@ class SentinelApp:
                     )
                 )
                 loop.close()
+                print(f"Work log saved: {log_type} ({duration} min)")
             except Exception as e:
                 print(f"Work log error: {e}")
 
@@ -729,7 +765,8 @@ class SentinelApp:
     def _flush_productivity_metrics(self):
         if not self._hourly_metrics:
             return
-        if not self.session_manager or not self.session_manager.backend_session_id:
+        if not (self.session_manager and
+                self.session_manager.backend_session_id):
             return
 
         payload = []
@@ -752,11 +789,13 @@ class SentinelApp:
                     "Content-Type":  "application/json"
                 }
                 with httpx.Client(timeout=10.0) as client:
-                    client.post(
+                    resp = client.post(
                         f"{Config.API_BASE_URL}/api/v1/productivity-metrics/bulk",
                         headers=headers,
                         json={"metrics": payload}
                     )
+                    if resp.status_code == 200:
+                        print(f"Productivity metrics synced: {len(payload)} records")
             except Exception as e:
                 print(f"Productivity metrics error: {e}")
 
@@ -767,6 +806,9 @@ class SentinelApp:
     # CONFLICT DIALOG
     # ─────────────────────────────────────────────────────────
     def _conflict_dialog(self, existing_session: dict):
+        if not self.main_window:
+            return
+
         dlg = ctk.CTkToplevel(self.main_window)
         dlg.title("Active session found")
         dlg.geometry("500x310")
@@ -781,14 +823,14 @@ class SentinelApp:
             f"+{(dlg.winfo_screenwidth()-500)//2}"
             f"+{(dlg.winfo_screenheight()-310)//2}")
 
-        container = ctk.CTkFrame(dlg, fg_color="#111C2E")
+        container = ctk.CTkFrame(dlg, fg_color=BG2)
         container.pack(fill="both", expand=True, padx=28, pady=28)
 
         ctk.CTkLabel(container, text="Active session on server",
-                     font=("Arial", 16, "bold"), text_color=AMBER).pack(pady=(0, 8))
+                     font=("Arial", 16, "bold"), text_color=AMBER).pack(pady=(0, 10))
 
         try:
-            start_dt = parse_datetime_ist(existing_session.get("start_time", ""))
+            start_dt  = parse_datetime_ist(existing_session.get("start_time", ""))
             start_str = start_dt.strftime("%I:%M %p on %B %d")
         except Exception:
             start_str = existing_session.get("start_time", "Unknown")
@@ -811,7 +853,9 @@ class SentinelApp:
             lid = self.current_session_id
             if lid and eid:
                 self.local_db.update_session(
-                    session_id=lid, backend_session_id=eid, status="active")
+                    session_id=lid,
+                    backend_session_id=eid,
+                    status="active")
                 self.session_manager.backend_session_id = eid
             self.abnormality_aggregator = AbnormalityAggregator(
                 session_id=lid or str(uuid.uuid4()),
@@ -820,6 +864,11 @@ class SentinelApp:
             )
             self._work_segment_start = now_ist()
             self._start_detection()
+            ts = now_ist().strftime("%I:%M %p")
+            if self.main_window:
+                self.main_window.add_feed_item(
+                    "info", "Continued existing session",
+                    f"Resumed detection · {ts}", "info")
 
         def _new():
             dlg.destroy()
@@ -859,6 +908,12 @@ class SentinelApp:
                     self._work_segment_start = now_ist()
                     self._hourly_metrics     = {}
                     self._start_detection()
+                    ts = now_ist().strftime("%I:%M %p")
+                    if self.main_window:
+                        self.main_window.after(
+                            0, lambda t=ts: self.main_window.add_feed_item(
+                                "info", "New session started",
+                                f"Detection active · {t}", "info"))
 
             threading.Thread(target=_run, daemon=True).start()
 
@@ -875,15 +930,19 @@ class SentinelApp:
                       ).grid(row=0, column=1, sticky="ew", padx=(8, 0))
 
 
+# ─────────────────────────────────────────────────────────────
 def main():
     try:
         Config.ensure_dirs()
+
         if len(sys.argv) > 1 and sys.argv[1] == "--reset":
             JWTHandler(Config.DB_DIR).clear_tokens()
-            print("Saved tokens cleared.")
+            print("Saved tokens cleared — please log in again.")
+
         SentinelApp().run()
+
     except KeyboardInterrupt:
-        print("\nApplication closed by user.")
+        print("\nApplication closed.")
         sys.exit(0)
     except Exception as e:
         print(f"Fatal error: {e}")

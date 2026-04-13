@@ -237,7 +237,7 @@ class SyncClient:
                     }
 
                     response = await client.post(
-                        f"{self.api_base_url}/api/v1/abnormalities/",
+                        f"{self.api_base_url}/api/v1/abnormalities",
                         headers=self._get_headers(),
                         json=payload
                     )
@@ -274,7 +274,7 @@ class SyncClient:
 
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(
-                    f"{self.api_base_url}/api/v1/sessions/start/",
+                    f"{self.api_base_url}/api/v1/sessions/start",
                     headers=self._get_headers()
                 )
 

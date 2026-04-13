@@ -1,6 +1,6 @@
 """
 Login Window — SENTINEL Desktop App
-Redesigned CustomTkinter UI
+Fixed CustomTkinter UI
 """
 import customtkinter as ctk
 from PIL import Image
@@ -18,32 +18,25 @@ def _load_ctk_image(filename: str, size: tuple) -> Optional[ctk.CTkImage]:
     path = _asset(filename)
     if not path.exists():
         return None
-    pil = Image.open(path).convert("RGBA")
-    return ctk.CTkImage(light_image=pil, dark_image=pil, size=size)
+    try:
+        pil = Image.open(path).convert("RGBA")
+        return ctk.CTkImage(light_image=pil, dark_image=pil, size=size)
+    except Exception:
+        return None
 
 
-# ── palette ──────────────────────────────────────────────────
-BG0  = "#0B1120"
-BG1  = "#0D1526"
-BG2  = "#111C2E"
-BG3  = "#1A2640"
-BORD = "#1E2D45"
-BORD2= "#243450"
+# ── Palette ──────────────────────────────────────────────────
+BG0  = "#0B1120"; BG1 = "#0D1526"; BG2 = "#111C2E"
+BG3  = "#1A2640"; BORD = "#1E2D45"; BORD2 = "#243450"
 
-GREEN = "#10B981"
-BLUE  = "#60A5FA"
-RED   = "#EF4444"
-AMBER = "#F59E0B"
+GREEN = "#10B981"; BLUE = "#60A5FA"; RED = "#EF4444"
 
-T1 = "#E2E8F0"
-T2 = "#94A3B8"
-T3 = "#475569"
-T4 = "#2D3F55"
+T1 = "#E2E8F0"; T2 = "#94A3B8"; T3 = "#475569"; T4 = "#2D3F55"
 
 
 class LoginWindow(ctk.CTk):
     """
-    Full-screen login window with shield branding.
+    SENTINEL login window.
     Calls on_login_success(user_dict, access_token) on success.
     """
 
@@ -61,13 +54,16 @@ class LoginWindow(ctk.CTk):
         self.api_base_url     = api_base_url
 
         self.title("SENTINEL — Login")
-        self.geometry("460x580")
+        self.geometry("440x560")
         self.resizable(False, False)
         self.configure(fg_color=BG0)
 
         ico = _asset("sentinel.ico")
         if ico.exists():
-            self.iconbitmap(str(ico))
+            try:
+                self.iconbitmap(str(ico))
+            except Exception:
+                pass
 
         self._shield_img: Optional[ctk.CTkImage] = None
         self._center()
@@ -75,7 +71,7 @@ class LoginWindow(ctk.CTk):
 
     def _center(self):
         self.update_idletasks()
-        w, h = 460, 580
+        w, h = 440, 560
         x = (self.winfo_screenwidth()  - w) // 2
         y = (self.winfo_screenheight() - h) // 2
         self.geometry(f"{w}x{h}+{x}+{y}")
@@ -83,35 +79,41 @@ class LoginWindow(ctk.CTk):
     def _build(self):
         self._shield_img = _load_ctk_image("sentinel_shield.png", (64, 64))
 
-        # outer card
-        card = ctk.CTkFrame(self, fg_color=BG1, corner_radius=16,
-                             border_color=BORD, border_width=1)
-        card.place(relx=.5, rely=.5, anchor="center", relwidth=.85)
+        # Outer container — fills the window
+        outer = ctk.CTkFrame(self, fg_color="transparent")
+        outer.pack(fill="both", expand=True, padx=32, pady=32)
 
-        # ── logo ──
-        logo_frame = ctk.CTkFrame(card, fg_color="transparent")
-        logo_frame.pack(pady=(36, 20))
+        # Card
+        card = ctk.CTkFrame(outer, fg_color=BG1, corner_radius=16,
+                             border_color=BORD, border_width=1)
+        card.pack(fill="both", expand=True)
+
+        # ── Logo section ──
+        logo_f = ctk.CTkFrame(card, fg_color="transparent")
+        logo_f.pack(pady=(32, 16))
 
         if self._shield_img:
-            ctk.CTkLabel(logo_frame, image=self._shield_img, text="").pack()
+            ctk.CTkLabel(logo_f, image=self._shield_img, text="").pack()
         else:
-            shield_box = ctk.CTkFrame(logo_frame, width=64, height=64,
-                                       fg_color="#1E3A6E", corner_radius=14)
-            shield_box.pack()
-            shield_box.pack_propagate(False)
-            ctk.CTkLabel(shield_box, text="S", font=("Arial", 28, "bold"),
-                         text_color=BLUE).place(relx=.5, rely=.5, anchor="center")
+            sh_box = ctk.CTkFrame(logo_f, width=64, height=64,
+                                   fg_color="#1E3A6E", corner_radius=14)
+            sh_box.pack()
+            sh_box.pack_propagate(False)
+            ctk.CTkLabel(sh_box, text="S", font=("Arial", 28, "bold"),
+                         text_color=BLUE
+                         ).place(relx=0.5, rely=0.5, anchor="center")
 
-        ctk.CTkLabel(logo_frame, text="SENTINEL",
-                     font=("Arial", 26, "bold"), text_color=T1,
+        ctk.CTkLabel(logo_f, text="SENTINEL",
+                     font=("Arial", 26, "bold"), text_color=T1
                      ).pack(pady=(10, 2))
-        ctk.CTkLabel(logo_frame, text="Work integrity system",
+        ctk.CTkLabel(logo_f, text="Work integrity system",
                      font=("Arial", 12), text_color=T3).pack()
 
-        # ── form ──
+        # ── Form ──
         form = ctk.CTkFrame(card, fg_color="transparent")
         form.pack(fill="x", padx=32, pady=(8, 0))
 
+        # Email
         ctk.CTkLabel(form, text="Email", font=("Arial", 12),
                      text_color=T3, anchor="w").pack(fill="x", pady=(0, 5))
         self.email_entry = ctk.CTkEntry(
@@ -119,10 +121,10 @@ class LoginWindow(ctk.CTk):
             height=42, corner_radius=8,
             fg_color=BG2, border_color=BORD2, border_width=1,
             text_color=T1, placeholder_text_color=T4,
-            font=("Arial", 13)
-        )
+            font=("Arial", 13))
         self.email_entry.pack(fill="x", pady=(0, 14))
 
+        # Password
         ctk.CTkLabel(form, text="Password", font=("Arial", 12),
                      text_color=T3, anchor="w").pack(fill="x", pady=(0, 5))
         self.password_entry = ctk.CTkEntry(
@@ -130,11 +132,10 @@ class LoginWindow(ctk.CTk):
             show="●", height=42, corner_radius=8,
             fg_color=BG2, border_color=BORD2, border_width=1,
             text_color=T1, placeholder_text_color=T4,
-            font=("Arial", 13)
-        )
+            font=("Arial", 13))
         self.password_entry.pack(fill="x", pady=(0, 14))
 
-        # remember me
+        # Remember me
         self.remember_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(
             form, text="Remember me", variable=self.remember_var,
@@ -142,35 +143,31 @@ class LoginWindow(ctk.CTk):
             fg_color=BLUE, hover_color="#2563EB",
             checkmark_color="white", corner_radius=4,
             border_color=BORD2
-        ).pack(anchor="w", pady=(0, 22))
+        ).pack(anchor="w", pady=(0, 20))
 
-        # login button
+        # Login button
         self.login_btn = ctk.CTkButton(
             form, text="Login", command=self._handle_login,
             height=46, corner_radius=10,
             fg_color="#1E3A6E", hover_color="#16305A",
-            text_color=BLUE, font=("Arial", 14, "bold")
-        )
-        self.login_btn.pack(fill="x", pady=(0, 12))
+            text_color=BLUE, font=("Arial", 14, "bold"))
+        self.login_btn.pack(fill="x", pady=(0, 10))
 
-        # status label
+        # Status label
         self.status_lbl = ctk.CTkLabel(
             form, text="", font=("Arial", 11),
-            text_color=RED, wraplength=340
-        )
+            text_color=RED, wraplength=360)
         self.status_lbl.pack(pady=(0, 4))
 
-        # api hint
+        # Footer
         ctk.CTkLabel(card, text=f"API: {self.api_base_url}",
                      font=("Arial", 9), text_color=T4
-                     ).pack(pady=(4, 6))
-
-        # version
+                     ).pack(pady=(4, 4))
         ctk.CTkLabel(card, text="v1.0.0",
                      font=("Arial", 10), text_color=T4
-                     ).pack(pady=(0, 20))
+                     ).pack(pady=(0, 18))
 
-        # key bindings
+        # Key bindings
         self.email_entry.bind("<Return>",
                                lambda _: self.password_entry.focus())
         self.password_entry.bind("<Return>",
@@ -209,25 +206,32 @@ class LoginWindow(ctk.CTk):
             else:
                 try:
                     msg = resp.json().get("detail", "Login failed")
+                    if isinstance(msg, dict):
+                        msg = str(msg)
                 except Exception:
                     msg = f"Login failed (HTTP {resp.status_code})"
-                self.after(0, lambda: self._login_failed(msg))
+                self.after(0, lambda m=msg: self._login_failed(m))
 
         except httpx.ConnectError:
             self.after(0, lambda: self._login_failed(
-                f"Cannot connect to backend.\n{self.api_base_url}"
+                f"Cannot connect to backend.\nCheck {self.api_base_url} is running."
+            ))
+        except httpx.TimeoutException:
+            self.after(0, lambda: self._login_failed(
+                "Connection timed out. Is the backend running?"
             ))
         except Exception as e:
-            self.after(0, lambda: self._login_failed(str(e)))
+            self.after(0, lambda err=str(e): self._login_failed(err))
 
     def _login_success(self, data: dict):
+        name = data.get("user", {}).get("full_name", "User")
         self.status_lbl.configure(
-            text=f"Welcome, {data['user']['full_name']}!", text_color=GREEN
-        )
-        self.after(900, lambda: self.on_login_success(
-            data["user"], data["access_token"]
-        ))
-        self.after(1400, self.destroy)
+            text=f"Welcome, {name}!", text_color=GREEN)
+        # Small delay so the welcome message is visible,
+        # then fire the callback. main.py will withdraw() this window
+        # before opening MainWindow, preventing the image binding issue.
+        self.after(800, lambda: self.on_login_success(
+            data["user"], data["access_token"]))
 
     def _login_failed(self, msg: str):
         self._show_error(msg)
@@ -235,7 +239,7 @@ class LoginWindow(ctk.CTk):
 
     def _show_error(self, msg: str):
         self.status_lbl.configure(text=msg, text_color=RED)
-        self.after(6000, lambda: self.status_lbl.configure(text=""))
+        self.after(7000, lambda: self.status_lbl.configure(text=""))
 
 
 if __name__ == "__main__":

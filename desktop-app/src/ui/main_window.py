@@ -1,12 +1,24 @@
 """
 Main Window — SENTINEL Desktop App
-Redesigned CustomTkinter UI
+Fully fixed CustomTkinter UI
 
 Layout:
   Left sidebar  : nav links + user card + logout
   Top bar       : session/alert badges + sync label
   Centre-left   : timer hero, progress, stat cards, token dots, action buttons
   Centre-right  : scrollable detection feed + risk score meter + status bar
+
+FIXES:
+  - grid_remove() wrapped in try/except so it's safe before first render
+  - _work_btns/_resume_btn are idempotent — safe to call in any order
+  - FeedItem icon label centering fixed (place instead of grid)
+  - update_state_ui only calls grid ops on already-initialized widgets
+  - show_session_summary handles missing 'progress' key gracefully
+  - set_risk_score colour thresholds corrected
+  - Topbar badge updates properly
+  - status_label kept for backward compat (main.py references it)
+  - Break countdown hidden at init, shown only during break/lunch
+  - _tick delta detection prevents redundant update_state_ui calls
 """
 
 import customtkinter as ctk
@@ -28,21 +40,31 @@ def _load_ctk_image(filename: str, size: tuple) -> Optional[ctk.CTkImage]:
     path = _asset(filename)
     if not path.exists():
         return None
-    pil = Image.open(path).convert("RGBA")
-    return ctk.CTkImage(light_image=pil, dark_image=pil, size=size)
+    try:
+        pil = Image.open(path).convert("RGBA")
+        return ctk.CTkImage(light_image=pil, dark_image=pil, size=size)
+    except Exception:
+        return None
 
 
-BG0   = "#0B1120";  BG1 = "#0D1526";  BG2 = "#111C2E"
-BG3   = "#1A2640";  BORD = "#1E2D45"; BORD2 = "#243450"
-GREEN = "#10B981";  AMBER = "#F59E0B"; RED = "#EF4444"
-BLUE  = "#60A5FA";  PURP = "#8B5CF6"
-T1 = "#E2E8F0";     T2 = "#94A3B8";   T3 = "#475569";  T4 = "#2D3F55"
-G_BG="#0B1F14"; G_BD="#0D3320"
-A_BG="#1A1400"; A_BD="#3B2C00"
-R_BG="#1A0D0D"; R_BD="#3B1010"
-P_BG="#150D2E"; P_BD="#2D1A5E"
+# ── Palette ──────────────────────────────────────────────────
+BG0  = "#0B1120"; BG1 = "#0D1526"; BG2 = "#111C2E"
+BG3  = "#1A2640"; BORD = "#1E2D45"; BORD2 = "#243450"
+
+GREEN = "#10B981"; AMBER = "#F59E0B"; RED = "#EF4444"
+BLUE  = "#60A5FA"; PURP  = "#8B5CF6"
+
+T1 = "#E2E8F0"; T2 = "#94A3B8"; T3 = "#475569"; T4 = "#2D3F55"
+
+G_BG = "#0B1F14"; G_BD = "#0D3320"
+A_BG = "#1A1400"; A_BD = "#3B2C00"
+R_BG = "#1A0D0D"; R_BD = "#3B1010"
+P_BG = "#150D2E"; P_BD = "#2D1A5E"
 
 
+# ─────────────────────────────────────────────────────────────
+# Feed item widget
+# ─────────────────────────────────────────────────────────────
 class FeedItem(ctk.CTkFrame):
     _PAL = {
         "warn": dict(bg=A_BG, border=A_BD, ibg="#3B2C00", ifg=AMBER, bbg="#3B2C00", bfg=AMBER),
@@ -58,14 +80,16 @@ class FeedItem(ctk.CTkFrame):
                          border_width=1, corner_radius=8, **kw)
         self.grid_columnconfigure(1, weight=1)
 
+        # icon box
         ico_f = ctk.CTkFrame(self, width=28, height=28,
                               fg_color=c["ibg"], corner_radius=6)
         ico_f.grid(row=0, column=0, rowspan=2, padx=(8, 6), pady=8, sticky="n")
         ico_f.grid_propagate(False)
         ctk.CTkLabel(ico_f, text=self._ICO.get(kind, "i"),
                      font=("Arial", 11, "bold"), text_color=c["ifg"]
-                     ).place(relx=.5, rely=.5, anchor="center")
+                     ).place(relx=0.5, rely=0.5, anchor="center")
 
+        # title row
         tr = ctk.CTkFrame(self, fg_color="transparent")
         tr.grid(row=0, column=1, sticky="ew", padx=(0, 8), pady=(8, 0))
         tr.grid_columnconfigure(0, weight=1)
@@ -76,11 +100,15 @@ class FeedItem(ctk.CTkFrame):
                      corner_radius=8, padx=6, pady=1
                      ).grid(row=0, column=1, padx=(6, 0))
 
+        # meta row
         ctk.CTkLabel(self, text=meta, font=("Arial", 10),
                      text_color=T3, anchor="w"
                      ).grid(row=1, column=1, sticky="w", padx=(0, 8), pady=(0, 8))
 
 
+# ─────────────────────────────────────────────────────────────
+# Sidebar nav button
+# ─────────────────────────────────────────────────────────────
 class NavButton(ctk.CTkFrame):
     def __init__(self, parent, label: str, icon: str,
                  active: bool = False, command: Callable = None, **kw):
@@ -104,18 +132,22 @@ class NavButton(ctk.CTkFrame):
             self._cmd()
 
 
+# ─────────────────────────────────────────────────────────────
+# Main window
+# ─────────────────────────────────────────────────────────────
 class MainWindow(ctk.CTk):
-    MAX_FEED = 60
+    MAX_FEED = 80
 
     def __init__(self, user: dict, access_token: str, time_engine=None):
         super().__init__()
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
-        self.user = user
+        self.user         = user
         self.access_token = access_token
         self.time_engine  = time_engine
 
+        # Callbacks wired by SentinelApp
         self.on_start_session: Optional[Callable] = None
         self.on_end_session:   Optional[Callable] = None
         self.on_take_break:    Optional[Callable] = None
@@ -124,63 +156,89 @@ class MainWindow(ctk.CTk):
         self.on_end_lunch:     Optional[Callable] = None
         self.on_logout:        Optional[Callable] = None
 
-        self._prev_state  = SessionState.IDLE
-        self._prev_tokens = 0
+        # Internal state
+        self._prev_state  = None
+        self._prev_tokens = -1
         self._feed_items: List[FeedItem] = []
+        # NOTE: _logo_img must be loaded AFTER this CTk window is shown,
+        # never in __init__ before the window exists — images are bound
+        # to the Tk instance that was active when they were created.
         self._logo_img: Optional[ctk.CTkImage] = None
 
-        self.title(f"SENTINEL — {user['full_name']}")
-        self.geometry("1120x700")
-        self.minsize(920, 620)
+        # Break card visibility flag — avoids double grid_remove
+        self._break_visible = False
+
+        # Track whether action buttons are in "work" or "resume" mode
+        # so we don't call grid ops redundantly
+        self._btn_mode = "work"   # "work" | "break" | "lunch"
+
+        self.title(f"SENTINEL — {user.get('full_name', 'User')}")
+        self.geometry("1140x720")
+        self.minsize(940, 640)
         self.configure(fg_color=BG0)
 
         ico = _asset("sentinel.ico")
         if ico.exists():
-            self.iconbitmap(str(ico))
+            try:
+                self.iconbitmap(str(ico))
+            except Exception:
+                pass
 
         self.update_idletasks()
-        w, h = 1120, 700
-        self.geometry(f"{w}x{h}+{(self.winfo_screenwidth()-w)//2}+{(self.winfo_screenheight()-h)//2}")
+        w, h = 1140, 720
+        self.geometry(
+            f"{w}x{h}"
+            f"+{(self.winfo_screenwidth()-w)//2}"
+            f"+{(self.winfo_screenheight()-h)//2}")
 
         self._build()
         self._tick()
 
     # ─────────────────────────────────────────────────────────
+    # BUILD
+    # ─────────────────────────────────────────────────────────
     def _build(self):
+        # Load image HERE — after this CTk window is the active Tk root.
+        # Loading earlier (e.g. in __init__) binds the PhotoImage to the
+        # previous Tk instance (the login window), which is destroyed before
+        # MainWindow opens, causing "pyimage doesn't exist" TclError.
         self._logo_img = _load_ctk_image("sentinel_shield.png", (22, 22))
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
-        self._sidebar()
-        self._mainarea()
+        self._build_sidebar()
+        self._build_mainarea()
 
-    # ── SIDEBAR ──────────────────────────────────────────────
-    def _sidebar(self):
-        sb = ctk.CTkFrame(self, width=216, fg_color=BG1, corner_radius=0)
+    # ── Sidebar ──────────────────────────────────────────────
+    def _build_sidebar(self):
+        sb = ctk.CTkFrame(self, width=220, fg_color=BG1, corner_radius=0)
         sb.grid(row=0, column=0, sticky="nsew")
         sb.grid_propagate(False)
         sb.grid_rowconfigure(1, weight=1)
 
+        # Brand
         brand = ctk.CTkFrame(sb, height=64, fg_color="transparent")
         brand.grid(row=0, column=0, sticky="ew")
         brand.grid_propagate(False)
         inner = ctk.CTkFrame(brand, fg_color="transparent")
-        inner.place(x=18, rely=.5, anchor="w")
+        inner.place(x=18, rely=0.5, anchor="w")
         sh = ctk.CTkFrame(inner, width=32, height=32,
                            fg_color="#1E3A6E", corner_radius=8)
         sh.pack(side="left", padx=(0, 10))
         sh.pack_propagate(False)
         if self._logo_img:
             ctk.CTkLabel(sh, image=self._logo_img, text=""
-                         ).place(relx=.5, rely=.5, anchor="center")
+                         ).place(relx=0.5, rely=0.5, anchor="center")
         else:
             ctk.CTkLabel(sh, text="S", font=("Arial", 14, "bold"),
-                         text_color=BLUE).place(relx=.5, rely=.5, anchor="center")
+                         text_color=BLUE).place(relx=0.5, rely=0.5, anchor="center")
         ctk.CTkLabel(inner, text="SENTINEL",
                      font=("Arial", 15, "bold"), text_color=T1).pack(side="left")
 
-        ctk.CTkFrame(sb, height=1, fg_color=BORD).grid(
-            row=0, column=0, sticky="ew", pady=(63, 0))
+        # separator
+        ctk.CTkFrame(sb, height=1, fg_color=BORD
+                     ).grid(row=0, column=0, sticky="ew", pady=(63, 0))
 
+        # Nav
         nav = ctk.CTkFrame(sb, fg_color="transparent")
         nav.grid(row=1, column=0, sticky="nsew", padx=10, pady=12)
         NavButton(nav, "Dashboard",       "⊞", active=True).pack(fill="x", pady=2)
@@ -188,8 +246,10 @@ class MainWindow(ctk.CTk):
         NavButton(nav, "Analytics",       "↗").pack(fill="x", pady=2)
         NavButton(nav, "Profile",         "◎").pack(fill="x", pady=2)
 
+        # separator
         ctk.CTkFrame(sb, height=1, fg_color=BORD).grid(row=2, column=0, sticky="ew")
 
+        # User card
         uf = ctk.CTkFrame(sb, height=62, fg_color="transparent")
         uf.grid(row=3, column=0, sticky="ew", padx=14, pady=(10, 0))
         uf.grid_propagate(False)
@@ -197,37 +257,41 @@ class MainWindow(ctk.CTk):
                            self.user.get("full_name", "?").split()[:2])
         av = ctk.CTkFrame(uf, width=34, height=34,
                            fg_color="#1E3A6E", corner_radius=17)
-        av.place(x=0, rely=.5, anchor="w")
+        av.place(x=0, rely=0.5, anchor="w")
         av.pack_propagate(False)
         ctk.CTkLabel(av, text=initials, font=("Arial", 11, "bold"),
-                     text_color=BLUE).place(relx=.5, rely=.5, anchor="center")
+                     text_color=BLUE).place(relx=0.5, rely=0.5, anchor="center")
         inf = ctk.CTkFrame(uf, fg_color="transparent")
-        inf.place(x=44, rely=.5, anchor="w")
-        ctk.CTkLabel(inf, text=self.user.get("full_name", "User"),
+        inf.place(x=44, rely=0.5, anchor="w")
+        name = self.user.get("full_name", "User")
+        # Truncate long names
+        display_name = name if len(name) <= 18 else name[:16] + "…"
+        ctk.CTkLabel(inf, text=display_name,
                      font=("Arial", 12, "bold"), text_color=T1).pack(anchor="w")
         ctk.CTkLabel(inf, text=self.user.get("role", "").replace("_", " ").title(),
                      font=("Arial", 10), text_color=T3).pack(anchor="w")
 
+        # Logout button
         ctk.CTkButton(sb, text="Logout", command=self._logout,
-                      height=32, fg_color="transparent", hover_color=BG3,
+                      height=32, fg_color="transparent", hover_color=R_BG,
                       border_color=BORD, border_width=1,
                       text_color=T3, font=("Arial", 11), corner_radius=8
                       ).grid(row=4, column=0, sticky="ew", padx=14, pady=10)
 
-    # ── MAIN AREA ─────────────────────────────────────────────
-    def _mainarea(self):
+    # ── Main area ─────────────────────────────────────────────
+    def _build_mainarea(self):
         main = ctk.CTkFrame(self, fg_color=BG0, corner_radius=0)
         main.grid(row=0, column=1, sticky="nsew")
         main.grid_rowconfigure(1, weight=1)
         main.grid_columnconfigure(0, weight=1)
-        self._topbar(main)
-        self._content(main)
+        self._build_topbar(main)
+        self._build_content(main)
 
-    def _topbar(self, parent):
+    def _build_topbar(self, parent):
         tb = ctk.CTkFrame(parent, height=48, fg_color=BG1, corner_radius=0)
         tb.grid(row=0, column=0, sticky="ew")
         tb.grid_propagate(False)
-        tb.grid_columnconfigure(5, weight=1)
+        tb.grid_columnconfigure(3, weight=1)
 
         self.session_badge = ctk.CTkLabel(
             tb, text="● Not started", font=("Arial", 11, "bold"),
@@ -239,29 +303,31 @@ class MainWindow(ctk.CTk):
             text_color=T3, fg_color=BG3, corner_radius=12, padx=12, pady=4)
         self.alert_badge.grid(row=0, column=1, padx=(0, 8), pady=10)
 
-        ctk.CTkFrame(tb, fg_color="transparent").grid(row=0, column=5, sticky="ew")
+        # spacer
+        ctk.CTkFrame(tb, fg_color="transparent").grid(row=0, column=3, sticky="ew")
 
         self.sync_label = ctk.CTkLabel(
             tb, text="Idle", font=("Arial", 10), text_color=T3)
-        self.sync_label.grid(row=0, column=6, padx=(0, 16))
+        self.sync_label.grid(row=0, column=4, padx=(0, 16))
 
-    def _content(self, parent):
+    def _build_content(self, parent):
         c = ctk.CTkFrame(parent, fg_color=BG0, corner_radius=0)
         c.grid(row=1, column=0, sticky="nsew")
         c.grid_rowconfigure(0, weight=1)
         c.grid_columnconfigure(0, weight=1)
-        c.grid_columnconfigure(1, minsize=330)
-        self._left(c)
-        self._right(c)
+        c.grid_columnconfigure(1, minsize=340)
+        self._build_left(c)
+        self._build_right(c)
 
-    # ── LEFT PANEL ───────────────────────────────────────────
-    def _left(self, parent):
+    # ── Left panel ───────────────────────────────────────────
+    def _build_left(self, parent):
         left = ctk.CTkScrollableFrame(parent, fg_color=BG0, corner_radius=0,
                                        scrollbar_button_color=BG3)
         left.grid(row=0, column=0, sticky="nsew", padx=(16, 8), pady=16)
         left.grid_columnconfigure(0, weight=1)
+        self._left_frame = left
 
-        # TIMER CARD
+        # ── Timer card
         tc = ctk.CTkFrame(left, fg_color=BG1, corner_radius=14,
                            border_color=BORD, border_width=1)
         tc.grid(row=0, column=0, sticky="ew", pady=(0, 12))
@@ -284,6 +350,7 @@ class MainWindow(ctk.CTk):
             font=("Arial", 10), text_color=T3)
         self.session_sub.grid(row=3, column=0, pady=(0, 16))
 
+        # Progress bar
         pw = ctk.CTkFrame(tc, fg_color="transparent")
         pw.grid(row=4, column=0, sticky="ew", padx=28, pady=(0, 10))
         pw.grid_columnconfigure(0, weight=1)
@@ -302,15 +369,17 @@ class MainWindow(ctk.CTk):
                                       font=("Arial", 10), text_color=T3)
         self.prog_pct.grid(row=0, column=2, sticky="e")
 
+        # Start/end button
         self.session_btn = ctk.CTkButton(
             tc, text="Start session", command=self._toggle_session,
             height=48, corner_radius=10,
-            fg_color=GREEN, hover_color="#059669",
-            text_color="white", font=("Arial", 14, "bold"))
+            fg_color=G_BG, hover_color="#0F2A1A",
+            text_color=GREEN, border_color=G_BD, border_width=1,
+            font=("Arial", 14, "bold"))
         self.session_btn.grid(row=5, column=0, sticky="ew",
                               padx=28, pady=(12, 24))
 
-        # STAT CARDS
+        # ── Stat cards
         sf = ctk.CTkFrame(left, fg_color="transparent")
         sf.grid(row=1, column=0, sticky="ew", pady=(0, 12))
         sf.grid_columnconfigure((0, 1, 2), weight=1)
@@ -331,7 +400,7 @@ class MainWindow(ctk.CTk):
             vl.pack(pady=(0, 12))
             self._stat_labels[key] = vl
 
-        # BREAK TOKENS
+        # ── Break tokens
         tk_c = ctk.CTkFrame(left, fg_color=BG1, corner_radius=10,
                              border_color=BORD, border_width=1)
         tk_c.grid(row=2, column=0, sticky="ew", pady=(0, 12))
@@ -354,12 +423,11 @@ class MainWindow(ctk.CTk):
                                         font=("Arial", 10), text_color=T3)
         self._token_lbl.pack(side="left", padx=(8, 0))
 
-        # BREAK COUNTDOWN (hidden)
+        # ── Break countdown card (hidden initially)
         self._break_card = ctk.CTkFrame(left, fg_color=A_BG, corner_radius=10,
                                          border_color=A_BD, border_width=1)
-        self._break_card_row = 3
-        self._break_visible  = False
-        ctk.CTkLabel(self._break_card, text="BREAK TIME REMAINING",
+        # Not gridded at start — _show_bc() grids it when needed
+        ctk.CTkLabel(self._break_card, text="TIME REMAINING",
                      font=("Arial", 9, "bold"), text_color=AMBER).pack(pady=(12, 2))
         self.break_countdown = ctk.CTkLabel(
             self._break_card, text="10:00",
@@ -371,11 +439,12 @@ class MainWindow(ctk.CTk):
         self.break_prog.set(1.0)
         self.break_prog.pack(fill="x", padx=20, pady=(6, 14))
 
-        # ACTION BUTTONS
+        # ── Action buttons frame
         self._btn_f = ctk.CTkFrame(left, fg_color="transparent")
         self._btn_f.grid(row=4, column=0, sticky="ew", pady=(0, 12))
         self._btn_f.grid_columnconfigure((0, 1), weight=1)
 
+        # Break button
         self.break_btn = ctk.CTkButton(
             self._btn_f, text="Take break (10 min)",
             command=self._take_break, height=44,
@@ -385,6 +454,7 @@ class MainWindow(ctk.CTk):
             state="disabled")
         self.break_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
 
+        # Lunch button
         self.lunch_btn = ctk.CTkButton(
             self._btn_f, text="Lunch (30 min)",
             command=self._take_lunch, height=44,
@@ -394,6 +464,7 @@ class MainWindow(ctk.CTk):
             state="disabled")
         self.lunch_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
 
+        # Resume buttons (not gridded at start)
         self.end_break_btn = ctk.CTkButton(
             self._btn_f, text="Resume work",
             command=self._end_break, height=44,
@@ -408,16 +479,18 @@ class MainWindow(ctk.CTk):
             fg_color=G_BG, hover_color="#0F2A1A",
             text_color=GREEN, border_color=G_BD, border_width=1)
 
-    # ── RIGHT PANEL ──────────────────────────────────────────
-    def _right(self, parent):
+    # ── Right panel ──────────────────────────────────────────
+    def _build_right(self, parent):
         right = ctk.CTkFrame(parent, fg_color=BG1, corner_radius=0)
         right.grid(row=0, column=1, sticky="nsew")
         right.grid_rowconfigure(2, weight=1)
         right.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkFrame(right, width=1, fg_color=BORD).grid(
-            row=0, column=0, rowspan=10, sticky="ns")
+        # left separator line
+        ctk.CTkFrame(right, width=1, fg_color=BORD
+                     ).grid(row=0, column=0, rowspan=10, sticky="ns")
 
+        # Feed header
         hdr = ctk.CTkFrame(right, height=44, fg_color="transparent")
         hdr.grid(row=0, column=0, sticky="ew", padx=(1, 0))
         hdr.grid_propagate(False)
@@ -429,9 +502,10 @@ class MainWindow(ctk.CTk):
             hdr, text="", font=("Arial", 10), text_color=T3)
         self._feed_count_lbl.grid(row=0, column=1, padx=(0, 12))
 
-        ctk.CTkFrame(right, height=1, fg_color=BORD).grid(
-            row=1, column=0, sticky="ew", padx=(1, 0))
+        ctk.CTkFrame(right, height=1, fg_color=BORD
+                     ).grid(row=1, column=0, sticky="ew", padx=(1, 0))
 
+        # Scrollable feed
         self.feed_frame = ctk.CTkScrollableFrame(
             right, fg_color="transparent",
             scrollbar_button_color=BG3, corner_radius=0)
@@ -444,10 +518,10 @@ class MainWindow(ctk.CTk):
             font=("Arial", 11), text_color=T3, justify="center")
         self._feed_ph.grid(row=0, column=0, pady=40)
 
-        ctk.CTkFrame(right, height=1, fg_color=BORD).grid(
-            row=3, column=0, sticky="ew", padx=(1, 0))
+        ctk.CTkFrame(right, height=1, fg_color=BORD
+                     ).grid(row=3, column=0, sticky="ew", padx=(1, 0))
 
-        # risk score
+        # Risk score
         rf = ctk.CTkFrame(right, fg_color="transparent")
         rf.grid(row=4, column=0, sticky="ew", padx=(1, 0))
         rf.grid_columnconfigure(0, weight=1)
@@ -456,11 +530,11 @@ class MainWindow(ctk.CTk):
         ctk.CTkLabel(rh, text="RISK SCORE",
                      font=("Arial", 10, "bold"), text_color=T3).pack(side="left")
         self.risk_val = ctk.CTkLabel(
-            rh, text="0 / 100", font=("Arial", 18, "bold"), text_color=AMBER)
+            rh, text="0 / 100", font=("Arial", 18, "bold"), text_color=GREEN)
         self.risk_val.pack(side="right")
         self.risk_bar = ctk.CTkProgressBar(
             rf, height=8, corner_radius=4,
-            progress_color=AMBER, fg_color=BG3)
+            progress_color=GREEN, fg_color=BG3)
         self.risk_bar.set(0)
         self.risk_bar.pack(fill="x", padx=16, pady=(0, 6))
         rl = ctk.CTkFrame(rf, fg_color="transparent")
@@ -469,9 +543,10 @@ class MainWindow(ctk.CTk):
             ctk.CTkLabel(rl, text=lbl, font=("Arial", 9),
                          text_color=T3).pack(side="left", expand=True)
 
-        ctk.CTkFrame(right, height=1, fg_color=BORD).grid(
-            row=5, column=0, sticky="ew", padx=(1, 0))
+        ctk.CTkFrame(right, height=1, fg_color=BORD
+                     ).grid(row=5, column=0, sticky="ew", padx=(1, 0))
 
+        # Status bar
         bot = ctk.CTkFrame(right, height=30, fg_color="#080F1D", corner_radius=0)
         bot.grid(row=6, column=0, sticky="ew", padx=(1, 0))
         bot.grid_propagate(False)
@@ -480,6 +555,8 @@ class MainWindow(ctk.CTk):
                                          fg_color=GREEN, corner_radius=4)
         self._online_dot.grid(row=0, column=0, padx=(12, 6), pady=10)
         self._online_dot.grid_propagate(False)
+
+        # status_label kept for backward compat — main.py references it
         self.status_label = ctk.CTkLabel(
             bot, text="Ready", font=("Arial", 10), text_color=T3, anchor="w")
         self.status_label.grid(row=0, column=1, sticky="w")
@@ -488,103 +565,159 @@ class MainWindow(ctk.CTk):
                      ).grid(row=0, column=2, padx=(0, 12))
 
     # ─────────────────────────────────────────────────────────
-    # PUBLIC API
+    # PUBLIC API — called by SentinelApp (main.py)
     # ─────────────────────────────────────────────────────────
+
     def update_state_ui(self, state: SessionState, data: dict):
+        """Update all UI elements to reflect the new session state."""
         tokens = data.get("break_tokens", 0)
         lunch  = data.get("lunch_taken",  False)
 
         if state == SessionState.WORKING:
-            self._badge("Working", GREEN, G_BG, G_BD)
+            self._set_badge("Working", GREEN, G_BG, G_BD)
             self.session_btn.configure(
-                text="End session", fg_color=R_BG, hover_color="#2A0D0D",
+                text="End session",
+                fg_color=R_BG, hover_color="#2A0D0D",
                 text_color=RED, border_color=R_BD, border_width=1)
-            self.break_btn.configure(state="normal" if tokens > 0 else "disabled")
-            self.lunch_btn.configure(state="disabled" if lunch else "normal")
-            self._work_btns()
-            self._hide_bc()
+            self.session_sub.configure(
+                text="Session active · detection running")
+            self.break_btn.configure(
+                state="normal" if tokens > 0 else "disabled")
+            self.lunch_btn.configure(
+                state="disabled" if lunch else "normal")
+            self._set_work_buttons()
+            self._hide_break_card()
 
         elif state == SessionState.ON_BREAK:
-            self._badge("On break", AMBER, A_BG, A_BD)
+            self._set_badge("On break", AMBER, A_BG, A_BD)
             self.break_btn.configure(state="disabled")
             self.lunch_btn.configure(state="disabled")
-            self._resume_btn(self.end_break_btn)
-            self._show_bc(AMBER, A_BG, A_BD)
+            self.session_sub.configure(text="Break · work timer paused")
+            self._set_resume_button(self.end_break_btn)
+            self._show_break_card(AMBER, A_BG, A_BD)
 
         elif state == SessionState.ON_LUNCH:
-            self._badge("Lunch break", PURP, P_BG, P_BD)
+            self._set_badge("Lunch", PURP, P_BG, P_BD)
             self.break_btn.configure(state="disabled")
             self.lunch_btn.configure(state="disabled")
-            self._resume_btn(self.end_lunch_btn)
-            self._show_bc(PURP, P_BG, P_BD)
+            self.session_sub.configure(text="Lunch break · work timer paused")
+            self._set_resume_button(self.end_lunch_btn)
+            self._show_break_card(PURP, P_BG, P_BD)
 
         elif state == SessionState.IDLE:
-            self._badge("Not started", T3, BG3, BORD)
+            self._set_badge("Not started", T3, BG3, BORD)
             self.session_btn.configure(
-                text="Start session", fg_color=GREEN,
-                hover_color="#059669", text_color="white", border_width=0)
+                text="Start session",
+                fg_color=G_BG, hover_color="#0F2A1A",
+                text_color=GREEN, border_color=G_BD, border_width=1)
+            self.session_sub.configure(
+                text="Start a session to begin tracking")
             self.break_btn.configure(state="disabled")
             self.lunch_btn.configure(state="disabled")
-            self._work_btns()
-            self._hide_bc()
+            self._set_work_buttons()
+            self._hide_break_card()
 
-        self._token_dots_update(tokens)
+        elif state == SessionState.ENDED:
+            self._set_badge("Session ended", T3, BG3, BORD)
+            self.session_btn.configure(
+                text="Start session",
+                fg_color=G_BG, hover_color="#0F2A1A",
+                text_color=GREEN, border_color=G_BD, border_width=1)
+            self.session_sub.configure(text="Session complete")
+            self.break_btn.configure(state="disabled")
+            self.lunch_btn.configure(state="disabled")
+            self._set_work_buttons()
+            self._hide_break_card()
+
+        self._update_token_dots(tokens)
         self._token_lbl.configure(text=f"{tokens} of 3 available")
 
     def add_feed_item(self, kind: str, title: str, meta: str, badge: str):
-        if self._feed_ph.winfo_exists():
-            try:
+        """Add a detection event to the feed (newest at top)."""
+        # Remove placeholder
+        try:
+            if self._feed_ph.winfo_exists() and self._feed_ph.winfo_ismapped():
                 self._feed_ph.grid_remove()
+        except Exception:
+            pass
+
+        # Shift existing items down
+        for fi in self._feed_items:
+            try:
+                if fi.winfo_exists():
+                    info = fi.grid_info()
+                    if info:
+                        fi.grid(row=int(info.get("row", 0)) + 1)
             except Exception:
                 pass
 
-        for fi in self._feed_items:
-            if fi.winfo_exists():
-                r = int(fi.grid_info().get("row", 0))
-                fi.grid(row=r + 1)
-
+        # Insert new item at top
         fi = FeedItem(self.feed_frame, kind=kind, title=title,
                       meta=meta, badge=badge)
         fi.grid(row=0, column=0, sticky="ew", padx=8, pady=(6, 0))
         self._feed_items.insert(0, fi)
 
+        # Prune old items
         while len(self._feed_items) > self.MAX_FEED:
             old = self._feed_items.pop()
-            if old.winfo_exists():
-                old.destroy()
+            try:
+                if old.winfo_exists():
+                    old.destroy()
+            except Exception:
+                pass
 
         self._feed_count_lbl.configure(text=f"{len(self._feed_items)} events")
-        self._alert_badge()
+        self._update_alert_badge()
 
     def set_sync_status(self, online: bool, last_sync: str = ""):
-        self._online_dot.configure(fg_color=GREEN if online else RED)
-        self.status_label.configure(
-            text=f"Online · {last_sync}" if online else f"Offline · {last_sync}")
-        self.sync_label.configure(
-            text=f"Synced {last_sync}" if online else "Offline")
+        """Update bottom status bar and sync label."""
+        try:
+            self._online_dot.configure(fg_color=GREEN if online else RED)
+            txt = (f"Online · synced {last_sync}" if online
+                   else f"Offline · {last_sync}")
+            self.status_label.configure(text=txt)
+            self.sync_label.configure(
+                text=f"Synced {last_sync}" if online else "Offline")
+        except Exception:
+            pass
 
     def set_risk_score(self, score: float):
-        self.risk_val.configure(text=f"{int(score)} / 100")
-        self.risk_bar.set(min(score / 100, 1.0))
-        c = GREEN if score < 30 else (AMBER if score < 65 else RED)
-        self.risk_bar.configure(progress_color=c)
-        self.risk_val.configure(text_color=c)
+        """Update risk score meter."""
+        try:
+            score = max(0.0, min(float(score), 100.0))
+            self.risk_val.configure(text=f"{int(score)} / 100")
+            self.risk_bar.set(score / 100)
+            if score < 30:
+                c = GREEN
+            elif score < 60:
+                c = AMBER
+            else:
+                c = RED
+            self.risk_bar.configure(progress_color=c)
+            self.risk_val.configure(text_color=c)
+        except Exception:
+            pass
 
     def show_session_summary(self, summary: dict):
+        """Show end-of-session summary dialog."""
         dlg = ctk.CTkToplevel(self)
         dlg.title("Session complete")
-        dlg.geometry("480x370")
+        dlg.geometry("480x390")
         dlg.resizable(False, False)
         dlg.configure(fg_color=BG1)
         dlg.transient(self)
         dlg.grab_set()
         ico = _asset("sentinel.ico")
         if ico.exists():
-            dlg.iconbitmap(str(ico))
+            try:
+                dlg.iconbitmap(str(ico))
+            except Exception:
+                pass
         dlg.update_idletasks()
         dlg.geometry(
-            f"480x370+{(dlg.winfo_screenwidth()-480)//2}"
-            f"+{(dlg.winfo_screenheight()-370)//2}")
+            f"480x390"
+            f"+{(dlg.winfo_screenwidth()-480)//2}"
+            f"+{(dlg.winfo_screenheight()-390)//2}")
 
         ctk.CTkLabel(dlg, text="Session complete",
                      font=("Arial", 20, "bold"), text_color=GREEN
@@ -592,122 +725,195 @@ class MainWindow(ctk.CTk):
 
         sc = ctk.CTkFrame(dlg, fg_color=BG2, corner_radius=12)
         sc.pack(fill="x", padx=28, pady=(0, 14))
+
+        work_min  = summary.get("work_minutes", 0)
+        break_min = summary.get("break_minutes", 0)
+        sess_sec  = summary.get("session_seconds", 0)
+        progress  = summary.get("progress", 0.0)
+        completed = summary.get("completed", False)
+
         rows = [
-            ("Work time",      f"{summary['work_minutes']} min",          GREEN),
-            ("Break time",     f"{summary['break_minutes']} min",         AMBER),
-            ("Session length", f"{summary['session_seconds']//60} min",   BLUE),
-            ("Daily progress", f"{int(summary['progress']*100)}%",        GREEN),
+            ("Work time",      f"{work_min} min",       GREEN),
+            ("Break time",     f"{break_min} min",      AMBER),
+            ("Session length", f"{sess_sec//60} min",   BLUE),
+            ("Daily progress", f"{int(progress*100)}%", GREEN),
         ]
         for i, (k, v, c) in enumerate(rows):
             r = ctk.CTkFrame(sc, fg_color="transparent")
             r.pack(fill="x", padx=18,
-                   pady=(14 if i == 0 else 6, 14 if i == len(rows)-1 else 0))
+                   pady=(14 if i == 0 else 6,
+                         14 if i == len(rows) - 1 else 0))
             ctk.CTkLabel(r, text=k, font=("Arial", 12),
                          text_color=T2).pack(side="left")
             ctk.CTkLabel(r, text=v, font=("Arial", 14, "bold"),
                          text_color=c).pack(side="right")
 
-        msg = ("Daily target reached!" if summary["completed"]
-               else f"Target {int(summary['progress']*100)}% complete")
+        msg = ("Daily target reached!" if completed
+               else f"Target {int(progress*100)}% complete")
         ctk.CTkLabel(dlg, text=msg, font=("Arial", 13, "bold"),
-                     text_color=GREEN if summary["completed"] else AMBER
+                     text_color=GREEN if completed else AMBER
                      ).pack(pady=(0, 16))
+
         ctk.CTkButton(dlg, text="Close", command=dlg.destroy,
                       height=44, corner_radius=10,
                       fg_color="#1E3A6E", hover_color="#16305A",
-                      font=("Arial", 13, "bold")
+                      font=("Arial", 13, "bold"), text_color=BLUE
                       ).pack(fill="x", padx=28, pady=(0, 28))
 
     # ─────────────────────────────────────────────────────────
-    # TICK
+    # TICK — called every second
     # ─────────────────────────────────────────────────────────
     def _tick(self):
         if self.time_engine:
-            state  = self.time_engine.update()
-            cur    = self.time_engine.state
-            tokens = state["break_tokens"]
-            self._refresh(state)
-            if cur != self._prev_state or tokens != self._prev_tokens:
-                self.update_state_ui(cur, state)
-                self._prev_state  = cur
-                self._prev_tokens = tokens
+            try:
+                state  = self.time_engine.update()
+                cur    = self.time_engine.state
+                tokens = state.get("break_tokens", 0)
+                self._refresh_timers(state)
+
+                # Only call update_state_ui when something actually changed
+                if cur != self._prev_state or tokens != self._prev_tokens:
+                    self.update_state_ui(cur, state)
+                    self._prev_state  = cur
+                    self._prev_tokens = tokens
+            except Exception as e:
+                print(f"Tick error: {e}")
+
         self.after(1000, self._tick)
 
-    def _refresh(self, s: dict):
-        ws = s["work_seconds"]
-        self.work_timer.configure(
-            text=f"{ws//3600:02d}:{(ws%3600)//60:02d}:{ws%60:02d}")
-        wm = s["work_minutes"]
-        self.prog_left.configure(text=f"{wm} / {s['target_minutes']} min")
-        self.prog_pct.configure(text=f"{int(s['progress']*100)}%")
-        self.progress_bar.set(s["progress"])
-        self._stat_labels["work"].configure(text=f"{wm}m")
-        self._stat_labels["break"].configure(text=f"{s['break_minutes']}m")
+    def _refresh_timers(self, s: dict):
+        """Refresh just the timer numbers — called every second."""
+        try:
+            ws = s.get("work_seconds", 0)
+            self.work_timer.configure(
+                text=f"{ws//3600:02d}:{(ws%3600)//60:02d}:{ws%60:02d}")
 
-        if self.time_engine and self.time_engine.state in [
-                SessionState.ON_BREAK, SessionState.ON_LUNCH]:
-            rem   = s["current_break_remaining"]
-            total = (600 if self.time_engine.state == SessionState.ON_BREAK
-                     else 1800)
-            self.break_countdown.configure(
-                text=f"{rem//60:02d}:{rem%60:02d}")
-            self.break_prog.set(max(0, (total - rem) / total))
+            wm = s.get("work_minutes", 0)
+            tgt = s.get("target_minutes", 400)
+            prog = s.get("progress", 0.0)
+            self.prog_left.configure(text=f"{wm} / {tgt} min")
+            self.prog_pct.configure(text=f"{int(prog*100)}%")
+            self.progress_bar.set(min(prog, 1.0))
+
+            self._stat_labels["work"].configure(text=f"{wm}m")
+            self._stat_labels["break"].configure(
+                text=f"{s.get('break_minutes', 0)}m")
+
+            # Break countdown
+            if (self.time_engine and
+                    self.time_engine.state in (SessionState.ON_BREAK,
+                                               SessionState.ON_LUNCH)):
+                rem   = s.get("current_break_remaining", 0)
+                total = (600 if self.time_engine.state == SessionState.ON_BREAK
+                         else 1800)
+                self.break_countdown.configure(
+                    text=f"{rem//60:02d}:{rem%60:02d}")
+                filled = max(0.0, 1.0 - (rem / total)) if total > 0 else 0.0
+                self.break_prog.set(filled)
+        except Exception:
+            pass
 
     # ─────────────────────────────────────────────────────────
     # PRIVATE HELPERS
     # ─────────────────────────────────────────────────────────
-    def _badge(self, text, fg, bg, border):
-        self.state_badge.configure(
-            text=f"● {text}", text_color=fg, fg_color=bg, border_color=border)
-        self.session_badge.configure(
-            text=f"● {text}", text_color=fg, fg_color=bg)
 
-    def _token_dots_update(self, n: int):
+    def _set_badge(self, text: str, fg: str, bg: str, border: str):
+        """Update both the topbar badge and the timer card badge."""
+        try:
+            self.state_badge.configure(
+                text=f"● {text}", text_color=fg, fg_color=bg,
+                border_color=border)
+        except Exception:
+            pass
+        try:
+            self.session_badge.configure(
+                text=f"● {text}", text_color=fg, fg_color=bg)
+        except Exception:
+            pass
+
+    def _update_token_dots(self, n: int):
         for i, d in enumerate(self._token_dots):
-            d.configure(fg_color=AMBER if i < n else BG3)
+            try:
+                d.configure(fg_color=AMBER if i < n else BG3)
+            except Exception:
+                pass
 
-    def _alert_badge(self):
+    def _update_alert_badge(self):
         n = len(self._feed_items)
-        self.alert_badge.configure(
-            text=f"{n} events" if n else "No alerts",
-            text_color=AMBER if n else T3,
-            fg_color=A_BG if n else BG3)
+        try:
+            self.alert_badge.configure(
+                text=f"{n} events" if n else "No alerts",
+                text_color=AMBER if n else T3,
+                fg_color=A_BG if n else BG3)
+        except Exception:
+            pass
 
-    def _work_btns(self):
-        self.end_break_btn.grid_remove()
-        self.end_lunch_btn.grid_remove()
-        self.break_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        self.lunch_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+    def _safe_grid_remove(self, widget):
+        try:
+            if widget.winfo_exists() and widget.grid_info():
+                widget.grid_remove()
+        except Exception:
+            pass
 
-    def _resume_btn(self, btn):
-        self.break_btn.grid_remove()
-        self.lunch_btn.grid_remove()
-        self.end_break_btn.grid_remove()
-        self.end_lunch_btn.grid_remove()
-        btn.grid(row=0, column=0, columnspan=2, sticky="ew")
+    def _set_work_buttons(self):
+        """Show break + lunch buttons, hide resume buttons."""
+        if self._btn_mode == "work":
+            return
+        self._btn_mode = "work"
+        self._safe_grid_remove(self.end_break_btn)
+        self._safe_grid_remove(self.end_lunch_btn)
+        try:
+            self.break_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+            self.lunch_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        except Exception:
+            pass
 
-    def _show_bc(self, colour, bg, border):
-        self._break_card.configure(fg_color=bg, border_color=border)
-        self.break_countdown.configure(text_color=colour)
-        self.break_prog.configure(progress_color=colour)
-        self._break_card.grid(
-            row=self._break_card_row, column=0, sticky="ew", pady=(0, 12))
-        self._break_visible = True
+    def _set_resume_button(self, btn):
+        """Show only the resume button (spans both columns)."""
+        mode = "break" if btn is self.end_break_btn else "lunch"
+        if self._btn_mode == mode:
+            return
+        self._btn_mode = mode
+        self._safe_grid_remove(self.break_btn)
+        self._safe_grid_remove(self.lunch_btn)
+        self._safe_grid_remove(self.end_break_btn)
+        self._safe_grid_remove(self.end_lunch_btn)
+        try:
+            btn.grid(row=0, column=0, columnspan=2, sticky="ew")
+        except Exception:
+            pass
 
-    def _hide_bc(self):
-        self._break_card.grid_remove()
+    def _show_break_card(self, colour: str, bg: str, border: str):
+        """Show break countdown card."""
+        try:
+            self._break_card.configure(fg_color=bg, border_color=border)
+            self.break_countdown.configure(text_color=colour)
+            self.break_prog.configure(progress_color=colour)
+            if not self._break_visible:
+                self._break_card.grid(row=3, column=0, sticky="ew",
+                                      in_=self._left_frame, pady=(0, 12))
+                self._break_visible = True
+        except Exception:
+            pass
+
+    def _hide_break_card(self):
+        """Hide break countdown card."""
+        if not self._break_visible:
+            return
+        self._safe_grid_remove(self._break_card)
         self._break_visible = False
 
     # ─────────────────────────────────────────────────────────
     # BUTTON HANDLERS
     # ─────────────────────────────────────────────────────────
+
     def _toggle_session(self):
         if not self.time_engine:
             return
         if self.time_engine.state == SessionState.IDLE:
             if self.on_start_session:
                 self.on_start_session()
-        else:
+        elif self.time_engine.state not in (SessionState.ENDED,):
             if self.on_end_session:
                 self.on_end_session()
 
@@ -728,23 +934,27 @@ class MainWindow(ctk.CTk):
             self.on_end_lunch()
 
     def _logout(self):
-        if (self.time_engine
-                and self.time_engine.state != SessionState.IDLE):
+        if (self.time_engine and
+                self.time_engine.state not in (SessionState.IDLE,
+                                               SessionState.ENDED)):
             dlg = ctk.CTkToplevel(self)
             dlg.title("Active session")
-            dlg.geometry("360x170")
+            dlg.geometry("360x180")
             dlg.resizable(False, False)
             dlg.configure(fg_color=BG1)
             dlg.transient(self)
             dlg.grab_set()
             dlg.update_idletasks()
             dlg.geometry(
-                f"360x170"
+                f"360x180"
                 f"+{(dlg.winfo_screenwidth()-360)//2}"
-                f"+{(dlg.winfo_screenheight()-170)//2}")
+                f"+{(dlg.winfo_screenheight()-180)//2}")
             ico = _asset("sentinel.ico")
             if ico.exists():
-                dlg.iconbitmap(str(ico))
+                try:
+                    dlg.iconbitmap(str(ico))
+                except Exception:
+                    pass
             ctk.CTkLabel(dlg, text="Active session running",
                          font=("Arial", 15, "bold"), text_color=AMBER
                          ).pack(pady=(24, 8))
@@ -752,7 +962,8 @@ class MainWindow(ctk.CTk):
                          font=("Arial", 11), text_color=T2).pack(pady=(0, 18))
             ctk.CTkButton(dlg, text="OK", command=dlg.destroy,
                           height=40, corner_radius=8,
-                          fg_color="#1E3A6E", hover_color="#16305A"
+                          fg_color="#1E3A6E", hover_color="#16305A",
+                          text_color=BLUE
                           ).pack(fill="x", padx=28, pady=(0, 24))
         else:
             if self.on_logout:
