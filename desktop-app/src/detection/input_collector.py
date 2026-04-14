@@ -142,6 +142,13 @@ class InputCollector:
         self.idle_checker_thread:  Optional[threading.Thread] = None
 
         # Windows API virtual key codes
+        # ── Per-pattern callback cooldown ────────────────────
+        # Prevents the same pattern from spamming the callback on every
+        # keypress / mouse event. Keyed by pattern type → last fire time.
+        self._last_pattern_fire: Dict[str, datetime] = {}
+        # How long to wait before re-firing the same pattern (seconds)
+        self._pattern_cooldown_seconds = 5 if DEMO_MODE else 10
+
         self.use_win32 = HAS_WIN32
         if self.use_win32:
             self.GetAsyncKeyState = ctypes.windll.user32.GetAsyncKeyState
@@ -417,6 +424,9 @@ class InputCollector:
         """
         Detect keyboard sitting — same key pressed repeatedly.
         Some employees put a heavy object on the keyboard to look active.
+
+        Fires at most once per _pattern_cooldown_seconds to avoid spamming
+        the callback on every key-repeat event when a key is held down.
         """
         if len(self.key_sequence) < 20:
             return
@@ -426,6 +436,11 @@ class InputCollector:
         most_common_key, count = Counter(recent_keys).most_common(1)[0]
 
         if count > 14:   # > 70% of last 20 keys are the same
+            now = datetime.now()
+            last = self._last_pattern_fire.get("keyboard_sitting")
+            if last and (now - last).total_seconds() < self._pattern_cooldown_seconds:
+                return  # still within cooldown — skip
+            self._last_pattern_fire["keyboard_sitting"] = now
             if self.on_pattern_detected:
                 self.on_pattern_detected({
                     "type":       "keyboard_sitting",
@@ -487,6 +502,11 @@ class InputCollector:
 
             # Regular 1–10 second movements with < 50ms std deviation = jiggler
             if std_dev < 50 and 1000 < avg_interval < 10000:
+                now = datetime.now()
+                last = self._last_pattern_fire.get("mouse_jiggler")
+                if last and (now - last).total_seconds() < self._pattern_cooldown_seconds:
+                    return  # still within cooldown — skip
+                self._last_pattern_fire["mouse_jiggler"] = now
                 if self.on_pattern_detected:
                     self.on_pattern_detected({
                         "type":       "mouse_jiggler",

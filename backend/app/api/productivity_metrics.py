@@ -15,7 +15,21 @@ router = APIRouter()
 
 
 def now_utc():
-    return datetime.now(timezone.utc)
+    return datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC for DB
+
+
+def to_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Strip timezone info → naive UTC datetime suitable for TIMESTAMP WITHOUT TIME ZONE."""
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        # Convert to UTC then drop the tzinfo so asyncpg is happy with TIMESTAMP WITHOUT TIME ZONE
+        from datetime import timedelta
+        utc_offset = dt.utcoffset()
+        if utc_offset is not None:
+            dt = dt - utc_offset
+        return dt.replace(tzinfo=None)
+    return dt
 
 
 class MetricCreate(BaseModel):
@@ -73,7 +87,7 @@ async def record_metrics_bulk(
             keystroke_count           = m.keystroke_count,
             mouse_movement_count      = m.mouse_movement_count,
             paste_count               = m.paste_count,
-            recorded_at               = m.recorded_at or now_utc(),
+            recorded_at               = to_naive_utc(m.recorded_at) or now_utc(),
         )
         db.add(metric)
         metrics.append(metric)

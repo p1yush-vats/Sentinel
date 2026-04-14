@@ -158,6 +158,14 @@ class SyncClient:
                 try:
                     local_session = self.local_db.get_session(abn["session_id"])
                     if not local_session or not local_session.get("backend_session_id"):
+                        # Orphaned record — the local session never got a backend ID
+                        # (e.g. created before a bug fix). It can never be synced
+                        # against Supabase because we have no server session to attach
+                        # it to. Mark it done so it doesn't loop forever.
+                        print(f"  ⚠️  Orphaned abnormality for session "
+                              f"{abn['session_id'][:8]}... — no backend session ID. "
+                              f"Marking as skipped.")
+                        self.local_db.mark_abnormality_synced(abn["session_id"])
                         failed_count += 1
                         continue
 
@@ -237,7 +245,7 @@ class SyncClient:
                     }
 
                     response = await client.post(
-                        f"{self.api_base_url}/api/v1/abnormalities",
+                        f"{self.api_base_url}/api/v1/abnormalities/",
                         headers=self._get_headers(),
                         json=payload
                     )
