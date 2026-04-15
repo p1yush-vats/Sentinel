@@ -50,7 +50,14 @@ async def generate_dossier(
     )
     flags = flag_result.scalars().all()
     
-    risk_score = round(employee.risk_score, 1) if employee.risk_score else 0
+    # Calculate Risk Score from sessions (recent 10 completed)
+    completed_scores = [s.risk_score for s in sessions if s.status == "completed" and s.risk_score is not None][:10]
+    total_w, total_s = 0.0, 0.0
+    for i, score in enumerate(completed_scores):
+        weight = 2.0 if i < 5 else 1.0
+        total_s += float(score) * weight
+        total_w += weight
+    risk_score = round(total_s / total_w, 1) if total_w > 0 else 0.0
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
