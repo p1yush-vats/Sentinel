@@ -1,7 +1,9 @@
 import axios from 'axios'
 
-const api = axios.create({ baseURL: '/api/v1', timeout: 15000 })
-
+const api = axios.create({ 
+  baseURL: import.meta.env.VITE_API_URL || '/api/v1', 
+  timeout: 15000 
+})
 api.interceptors.response.use(
   (r) => r,
   (err) => {
@@ -24,11 +26,12 @@ export const authAPI = {
 
 // ── Admin: Employees ──────────────────────────────────────────
 export const employeesAPI = {
-  getAll:  (p)      => api.get('/employees/', { params: p }),
-  getOne:  (id)     => api.get(`/employees/${id}`),
-  create:  (d)      => api.post('/employees/', d),
-  update:  (id, d)  => api.patch(`/employees/${id}`, d),
-  remove:  (id)     => api.delete(`/employees/${id}`),
+  getAll:    (p)      => api.get('/employees/', { params: p }),
+  getOne:    (id)     => api.get(`/employees/${id}`),
+  create:    (d)      => api.post('/employees/', d),
+  update:    (id, d)  => api.patch(`/employees/${id}`, d),
+  remove:    (id)     => api.delete(`/employees/${id}`),
+  sendAlert: (id, d)  => api.post(`/employees/${id}/alert`, d),
 }
 
 // ── Sessions (admin + employee) ───────────────────────────────

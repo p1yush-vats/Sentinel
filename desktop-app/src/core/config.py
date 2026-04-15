@@ -29,6 +29,9 @@ class Config:
     API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
     API_VERSION  = "/api/v1"
 
+    # Employee portal URL — used by webbrowser.open() for sidebar tabs
+    PORTAL_URL = os.getenv("PORTAL_URL", "http://localhost:5173")
+
     # Work Rules (match backend defaults)
     WORK_MINUTES_PER_HOUR      = int(os.getenv("WORK_MINUTES_PER_HOUR", 50))
     BREAK_MINUTES_PER_HOUR     = int(os.getenv("BREAK_MINUTES_PER_HOUR", 10))

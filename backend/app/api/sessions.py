@@ -9,6 +9,7 @@ import uuid
 from ..core.database import get_db
 from ..core.security import get_current_user_id, RoleChecker
 from ..core.timezone_utils import now_utc, to_utc, to_ist, format_ist
+from ..core.websocket import manager
 from ..models.session import Session, WorkTimeLog
 from .audit_log import write_audit
 
@@ -88,9 +89,12 @@ async def start_session(
         metadata={"start_time": session.start_time.isoformat()})
     await db.commit()
 
+    payload = session.to_dict()
+    await manager.broadcast({"type": "session_update", "data": payload})
+
     return {
         "conflict": False,
-        "session":  session.to_dict(),
+        "session":  payload,
         "message":  "Session started successfully"
     }
 
@@ -116,7 +120,11 @@ async def update_session(
 
     await db.commit()
     await db.refresh(session)
-    return {"message": "Session updated", "session": session.to_dict()}
+
+    payload = session.to_dict()
+    await manager.broadcast({"type": "session_update", "data": payload})
+
+    return {"message": "Session updated", "session": payload}
 
 
 @router.post("/{session_id}/end")
@@ -153,7 +161,10 @@ async def end_session(
         })
     await db.commit()
 
-    return {"message": "Session ended", "session": session.to_dict()}
+    payload = session.to_dict()
+    await manager.broadcast({"type": "session_update", "data": payload})
+
+    return {"message": "Session ended", "session": payload}
 
 
 @router.delete("/{session_id}")

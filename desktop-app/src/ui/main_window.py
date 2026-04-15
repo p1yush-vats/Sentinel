@@ -22,14 +22,73 @@ FIXES:
 """
 
 import customtkinter as ctk
-from PIL import Image
+from PIL import Image, ImageDraw
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Callable, List
 import sys
+import threading
+import urllib.request
+import io
+import webbrowser
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.time_engine import SessionState
+from core.config import Config
+
+
+# ─────────────────────────────────────────────────────────────────
+# Notification Manager
+# ─────────────────────────────────────────────────────────────────
+class NotificationManager:
+    """
+    Sends Windows OS toast notifications via winotify.
+    Falls back silently if winotify is not installed.
+    One class, instantiated once by MainWindow.
+    """
+    def __init__(self):
+        self._icon = str(_asset("sentinel.ico"))
+        try:
+            from winotify import Notification, audio as _audio
+            self._Notification = Notification
+            self._audio        = _audio
+            self._available    = True
+        except ImportError:
+            self._available = False
+            print("[Notifications] winotify not installed — OS toasts disabled.")
+            print("[Notifications] Run: pip install winotify")
+
+    def send(self, title: str, msg: str, severity: str = "info") -> None:
+        """
+        severity: 'ok' | 'warn' | 'crit' | 'info'
+        Toasts are rate-limited to 1 per (title+severity) per 60 seconds
+        to avoid spamming the user.
+        """
+        if not self._available:
+            return
+        threading.Thread(
+            target=self._send_bg,
+            args=(title, msg, severity),
+            daemon=True
+        ).start()
+
+    def _send_bg(self, title: str, msg: str, severity: str) -> None:
+        try:
+            from winotify import Notification, audio
+            icon = self._icon if Path(self._icon).exists() else ""
+            toast = Notification(
+                app_id   = "SENTINEL Monitoring",
+                title    = title,
+                msg      = msg,
+                icon     = icon,
+                duration = "short",   # or 'long' for crit
+            )
+            if severity == "crit":
+                toast.set_audio(audio.Reminder, loop=False)
+            toast.show()
+        except Exception as e:
+            print(f"[Notifications] Toast error: {e}")
+
 
 
 def _asset(filename: str) -> Path:
@@ -133,6 +192,65 @@ class NavButton(ctk.CTkFrame):
 
 
 # ─────────────────────────────────────────────────────────────
+# In-app notification banner
+# ─────────────────────────────────────────────────────────────
+class _NotificationBanner(ctk.CTkFrame):
+    """Slim slide-in banner that appears at the top of the content area."""
+    _PAL = {
+        "warn": (A_BG, A_BD, AMBER, "⚠"),
+        "crit": (R_BG, R_BD, RED,   "✕"),
+        "ok":   (G_BG, G_BD, GREEN, "✓"),
+        "info": (BG2,  BORD, BLUE,  "i"),
+    }
+
+    def __init__(self, parent, **kw):
+        super().__init__(parent, fg_color="transparent", height=50, **kw)
+        self.grid_propagate(False)
+        self.grid_columnconfigure(0, weight=1)
+        
+        # Inner floating pill
+        self._pill = ctk.CTkFrame(self, fg_color=A_BG, border_color=A_BD,
+                                  border_width=1, corner_radius=18)
+        self._pill.grid(row=0, column=0, pady=(16, 0))
+        self._pill.grid_columnconfigure(1, weight=1)
+        
+        self._icon_lbl = ctk.CTkLabel(self._pill, text="⚠", font=("Arial", 16, "bold"),
+                                       text_color=AMBER, width=28)
+        self._icon_lbl.grid(row=0, column=0, padx=(16, 4), pady=8)
+        
+        self._msg_lbl  = ctk.CTkLabel(self._pill, text="", font=("Arial", 12, "bold"),
+                                       text_color=AMBER, anchor="w")
+        self._msg_lbl.grid(row=0, column=1, sticky="w", padx=(2, 8), pady=8)
+        
+        self._close_btn = ctk.CTkButton(
+            self._pill, text="✕", width=26, height=26, corner_radius=13,
+            fg_color="transparent", hover_color=BG3, text_color=T3,
+            font=("Arial", 11, "bold"), command=self._dismiss)
+        self._close_btn.grid(row=0, column=2, padx=(2, 10), pady=8)
+        
+        self._after_id = None
+
+    def show(self, msg: str, severity: str = "warn", duration_ms: int = 5000, icon: str = None):
+        bg, bd, fg, default_icon = self._PAL.get(severity, self._PAL["info"])
+        self._pill.configure(fg_color=bg, border_color=bd)
+        self._icon_lbl.configure(text=icon or default_icon, text_color=fg)
+        self._msg_lbl.configure(text=msg,   text_color=fg)
+        self.grid(row=0, column=0, sticky="ew")
+        if self._after_id:
+            try:
+                self.after_cancel(self._after_id)
+            except Exception:
+                pass
+        self._after_id = self.after(duration_ms, self._dismiss)
+
+    def _dismiss(self):
+        try:
+            self.grid_remove()
+        except Exception:
+            pass
+
+
+# ─────────────────────────────────────────────────────────────
 # Main window
 # ─────────────────────────────────────────────────────────────
 class MainWindow(ctk.CTk):
@@ -147,6 +265,9 @@ class MainWindow(ctk.CTk):
         self.access_token = access_token
         self.time_engine  = time_engine
 
+        # Notification Manager (OS toasts)
+        self.notifier = NotificationManager()
+
         # Callbacks wired by SentinelApp
         self.on_start_session: Optional[Callable] = None
         self.on_end_session:   Optional[Callable] = None
@@ -158,6 +279,8 @@ class MainWindow(ctk.CTk):
 
         # Internal state
         self._prev_state  = None
+        self._current_risk_score = 0.0
+        self._offense_count = 0
         self._prev_tokens = -1
         self._feed_items: List[FeedItem] = []
         # NOTE: _logo_img must be loaded AFTER this CTk window is shown,
@@ -237,10 +360,25 @@ class MainWindow(ctk.CTk):
         # Nav
         nav = ctk.CTkFrame(sb, fg_color="transparent")
         nav.grid(row=1, column=0, sticky="nsew", padx=10, pady=12)
-        NavButton(nav, "Dashboard",       "⊞", active=True).pack(fill="x", pady=2)
-        NavButton(nav, "Session history", "○").pack(fill="x", pady=2)
-        NavButton(nav, "Analytics",       "↗").pack(fill="x", pady=2)
-        NavButton(nav, "Profile",         "◎").pack(fill="x", pady=2)
+        
+        self._nav_btns = {}
+        self._nav_btns["dashboard"] = NavButton(
+            nav, "Dashboard", "⊞", active=True,
+            command=lambda: self._show_view("dashboard"))
+        self._nav_btns["dashboard"].pack(fill="x", pady=2)
+
+        # ── Portal shortcut tabs (open employee portal in default browser) ──
+        portal_items = [
+            ("history",   "Session History", "○", "my/sessions"),
+            ("calendar",  "My Calendar",     "▦", "my/calendar"),
+            ("myleave",   "Leave & Appeals", "⇑", "my/leave"),
+        ]
+        for key, label, icon, path in portal_items:
+            btn = NavButton(
+                nav, label, icon,
+                command=lambda p=path: self._open_portal(p))
+            btn.pack(fill="x", pady=2)
+            self._nav_btns[key] = btn
 
         # separator
         ctk.CTkFrame(sb, height=1, fg_color=BORD).grid(row=2, column=0, sticky="ew")
@@ -255,8 +393,12 @@ class MainWindow(ctk.CTk):
                            fg_color="#1E3A6E", corner_radius=17)
         av.place(x=0, rely=0.5, anchor="w")
         av.pack_propagate(False)
-        ctk.CTkLabel(av, text=initials, font=("Arial", 11, "bold"),
-                     text_color=BLUE).place(relx=0.5, rely=0.5, anchor="center")
+        self.avatar_lbl = ctk.CTkLabel(av, text=initials, font=("Arial", 11, "bold"), text_color=BLUE)
+        self.avatar_lbl.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Trigger async image fetch if URL exists
+        self._load_avatar_async()
+        
         inf = ctk.CTkFrame(uf, fg_color="transparent")
         inf.place(x=44, rely=0.5, anchor="w")
         name = self.user.get("full_name", "User")
@@ -274,8 +416,69 @@ class MainWindow(ctk.CTk):
                       text_color=T3, font=("Arial", 11), corner_radius=8
                       ).grid(row=4, column=0, sticky="ew", padx=14, pady=10)
 
+    # ── Avatar Fetching ──────────────────────────────────────
+    def _load_avatar_async(self):
+        url = self.user.get("avatar_url")
+        if not url:
+            return
+        
+        def fetch():
+            try:
+                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    data = resp.read()
+                
+                # Create circular mask
+                img = Image.open(io.BytesIO(data)).convert("RGBA")
+                
+                # Resize to 68x68 for high DPI crispness (downscaled to 34x34)
+                size = (68, 68)
+                img = img.resize(size, Image.Resampling.LANCZOS)
+                
+                mask = Image.new("L", size, 0)
+                draw = ImageDraw.Draw(mask)
+                draw.ellipse((0, 0) + size, fill=255)
+                
+                output = Image.new("RGBA", size, (0, 0, 0, 0))
+                output.paste(img, (0, 0), mask)
+                
+                # Update UI safely on main thread passing the raw PIL image
+                self.after(0, lambda: self._apply_avatar(output))
+            except Exception as e:
+                print(f"Failed to fetch avatar: {e}")
+
+        threading.Thread(target=fetch, daemon=True).start()
+        
+    def _apply_avatar(self, raw_pil_image):
+        if hasattr(self, 'avatar_lbl'):
+            from PIL import ImageTk
+            photo = ImageTk.PhotoImage(image=raw_pil_image, master=self)
+            self.avatar_lbl.configure(text="", image=photo)
+            self._avatar_ctk_img = photo # Keep ref so it isn't garbage collected
+
+    def _open_portal(self, path: str) -> None:
+        """
+        Open a portal page in the user's default browser.
+        The JWT is embedded in the URL hash fragment — fragments are
+        never sent to the server, so the token won't appear in access
+        logs. The authStore reads it on page load, hydrates itself,
+        then immediately clears it from the URL.
+
+        Format:  https://portal.example.com/my/sessions#token=eyJ...
+        """
+        token = getattr(self, "access_token", "") or ""
+        base  = Config.PORTAL_URL.rstrip("/")
+        url   = f"{base}/{path}"
+        if token:
+            url = f"{url}#token={token}"
+        threading.Thread(
+            target=lambda: webbrowser.open(url),
+            daemon=True
+        ).start()
+
     # ── Main area ─────────────────────────────────────────────
     def _build_mainarea(self):
+
         main = ctk.CTkFrame(self, fg_color=BG0, corner_radius=0)
         main.grid(row=0, column=1, sticky="nsew")
         main.grid_rowconfigure(1, weight=1)
@@ -306,14 +509,66 @@ class MainWindow(ctk.CTk):
             tb, text="Idle", font=("Arial", 10), text_color=T3)
         self.sync_label.grid(row=0, column=4, padx=(0, 16))
 
+        self._right_panel_view = "feed" # "feed" or "alerts"
+
+        self._right_panel_view = "feed" # "feed" or "alerts"
+
     def _build_content(self, parent):
-        c = ctk.CTkFrame(parent, fg_color=BG0, corner_radius=0)
-        c.grid(row=1, column=0, sticky="nsew")
-        c.grid_rowconfigure(0, weight=1)
-        c.grid_columnconfigure(0, weight=1)
-        c.grid_columnconfigure(1, minsize=340)
-        self._build_left(c)
-        self._build_right(c)
+        self.content_container = ctk.CTkFrame(parent, fg_color=BG0, corner_radius=0)
+        self.content_container.grid(row=1, column=0, sticky="nsew")
+        self.content_container.grid_rowconfigure(1, weight=1)
+        self.content_container.grid_columnconfigure(0, weight=1)
+
+        # ── Notification banner (slides in below topbar) ────
+        self._notif_banner = _NotificationBanner(self.content_container)
+        # starts hidden; shown by show_banner()
+
+        # Dashboard View (the only native view)
+        self.dashboard_frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
+        self.dashboard_frame.grid_rowconfigure(0, weight=1)
+        self.dashboard_frame.grid_columnconfigure(0, weight=1)
+        self.dashboard_frame.grid_columnconfigure(1, minsize=340)
+        self._alert_history = []
+        self._build_left(self.dashboard_frame)
+        self._build_right(self.dashboard_frame)
+
+        self._show_view("dashboard")
+
+    def _toggle_alerts_panel(self):
+        if self._right_panel_view == "feed":
+            self.feed_container.grid_remove()
+            self.alerts_container.grid(row=0, column=0, rowspan=10, sticky="nsew")
+            self._right_panel_view = "alerts"
+        else:
+            self.alerts_container.grid_remove()
+            self.feed_container.grid(row=0, column=0, rowspan=10, sticky="nsew")
+            self._right_panel_view = "feed"
+
+    def _show_view(self, view_name: str):
+        for f in [self.dashboard_frame]:
+            f.grid_remove()
+
+        # Reset nav buttons
+        if hasattr(self, '_nav_btns'):
+            for name, btn in self._nav_btns.items():
+                for ch in btn.winfo_children():
+                    if isinstance(ch, ctk.CTkLabel):
+                        ch.configure(text_color=T3)
+                btn.configure(fg_color="transparent")
+
+        if view_name == "dashboard":
+            self.dashboard_frame.grid(row=1, column=0, sticky="nsew")
+
+        if hasattr(self, '_nav_btns') and view_name in self._nav_btns:
+            btn = self._nav_btns[view_name]
+            btn.configure(fg_color=BG3)
+            for ch in btn.winfo_children():
+                if isinstance(ch, ctk.CTkLabel):
+                    if ch.cget("width") == 16:
+                        ch.configure(text_color=BLUE)
+                    else:
+                        ch.configure(text_color=T1)
+
 
     # ── Left panel ───────────────────────────────────────────
     def _build_left(self, parent):
@@ -479,86 +734,114 @@ class MainWindow(ctk.CTk):
     def _build_right(self, parent):
         right = ctk.CTkFrame(parent, fg_color=BG1, corner_radius=0)
         right.grid(row=0, column=1, sticky="nsew")
-        right.grid_rowconfigure(2, weight=1)
-        right.grid_columnconfigure(0, weight=1)
+        right.grid_rowconfigure(0, weight=1)
+        right.grid_columnconfigure(1, weight=1)
 
         # left separator line
         ctk.CTkFrame(right, width=1, fg_color=BORD
                      ).grid(row=0, column=0, rowspan=10, sticky="ns")
 
+        # ── Right panel wrapper
+        self.right_wrapper = ctk.CTkFrame(right, fg_color="transparent")
+        self.right_wrapper.grid(row=0, column=1, rowspan=10, sticky="nsew")
+        self.right_wrapper.grid_rowconfigure(0, weight=1)
+        self.right_wrapper.grid_columnconfigure(0, weight=1)
+
+        # ── Feed Container ──
+        self.feed_container = ctk.CTkFrame(self.right_wrapper, fg_color="transparent")
+        self.feed_container.grid(row=0, column=0, sticky="nsew")
+        self.feed_container.grid_rowconfigure(2, weight=1)
+        self.feed_container.grid_columnconfigure(0, weight=1)
+
         # Feed header
-        hdr = ctk.CTkFrame(right, height=44, fg_color="transparent")
+        hdr = ctk.CTkFrame(self.feed_container, height=44, fg_color="transparent")
         hdr.grid(row=0, column=0, sticky="ew", padx=(1, 0))
         hdr.grid_propagate(False)
-        hdr.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(hdr, text="DETECTION FEED",
-                     font=("Arial", 10, "bold"), text_color=T3
-                     ).grid(row=0, column=0, sticky="w", padx=16, pady=12)
-        self._feed_count_lbl = ctk.CTkLabel(
-            hdr, text="", font=("Arial", 10), text_color=T3)
-        self._feed_count_lbl.grid(row=0, column=1, padx=(0, 12))
+        hdr.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(hdr, text="DETECTION FEED", font=("Arial", 10, "bold"), text_color=T3).grid(row=0, column=0, sticky="w", padx=16, pady=12)
+        self._feed_count_lbl = ctk.CTkLabel(hdr, text="", font=("Arial", 10), text_color=T3)
+        self._feed_count_lbl.grid(row=0, column=1, sticky="w", padx=(0, 12))
 
-        ctk.CTkFrame(right, height=1, fg_color=BORD
-                     ).grid(row=1, column=0, sticky="ew", padx=(1, 0))
+        # Toggle button in the right side of the Feed header
+        self.feed_to_alerts_btn = ctk.CTkButton(
+            hdr, text="🔔 Alerts", command=self._toggle_alerts_panel,
+            font=("Arial", 11, "bold"), text_color=T3, fg_color="transparent",
+            hover_color=BG3, width=64, height=28, corner_radius=6
+        )
+        self.feed_to_alerts_btn.grid(row=0, column=2, padx=(0, 16))
+
+        ctk.CTkFrame(self.feed_container, height=1, fg_color=BORD).grid(row=1, column=0, sticky="ew", padx=(1, 0))
 
         # Scrollable feed
-        self.feed_frame = ctk.CTkScrollableFrame(
-            right, fg_color="transparent",
-            scrollbar_button_color=BG3, corner_radius=0)
+        self.feed_frame = ctk.CTkScrollableFrame(self.feed_container, fg_color="transparent", scrollbar_button_color=BG3, corner_radius=0)
         self.feed_frame.grid(row=2, column=0, sticky="nsew", padx=(1, 0))
         self.feed_frame.grid_columnconfigure(0, weight=1)
 
-        self._feed_ph = ctk.CTkLabel(
-            self.feed_frame,
-            text="Detection events will appear\nhere once a session is active.",
-            font=("Arial", 11), text_color=T3, justify="center")
+        self._feed_ph = ctk.CTkLabel(self.feed_frame, text="Detection events will appear\nhere once a session is active.", font=("Arial", 11), text_color=T3, justify="center")
         self._feed_ph.grid(row=0, column=0, pady=40)
 
-        ctk.CTkFrame(right, height=1, fg_color=BORD
-                     ).grid(row=3, column=0, sticky="ew", padx=(1, 0))
+        ctk.CTkFrame(self.feed_container, height=1, fg_color=BORD).grid(row=3, column=0, sticky="ew", padx=(1, 0))
 
         # Risk score
-        rf = ctk.CTkFrame(right, fg_color="transparent")
+        rf = ctk.CTkFrame(self.feed_container, fg_color="transparent")
         rf.grid(row=4, column=0, sticky="ew", padx=(1, 0))
         rf.grid_columnconfigure(0, weight=1)
         rh = ctk.CTkFrame(rf, fg_color="transparent")
         rh.pack(fill="x", padx=16, pady=(12, 8))
-        ctk.CTkLabel(rh, text="RISK SCORE",
-                     font=("Arial", 10, "bold"), text_color=T3).pack(side="left")
-        self.risk_val = ctk.CTkLabel(
-            rh, text="0 / 100", font=("Arial", 18, "bold"), text_color=GREEN)
+        ctk.CTkLabel(rh, text="RISK SCORE", font=("Arial", 10, "bold"), text_color=T3).pack(side="left")
+        self.risk_val = ctk.CTkLabel(rh, text="0 / 100", font=("Arial", 18, "bold"), text_color=GREEN)
         self.risk_val.pack(side="right")
-        self.risk_bar = ctk.CTkProgressBar(
-            rf, height=8, corner_radius=4,
-            progress_color=GREEN, fg_color=BG3)
+        self.risk_bar = ctk.CTkProgressBar(rf, height=8, corner_radius=4, progress_color=GREEN, fg_color=BG3)
         self.risk_bar.set(0)
         self.risk_bar.pack(fill="x", padx=16, pady=(0, 6))
         rl = ctk.CTkFrame(rf, fg_color="transparent")
         rl.pack(fill="x", padx=16, pady=(0, 12))
         for lbl in ["Low", "Medium", "High", "Critical"]:
-            ctk.CTkLabel(rl, text=lbl, font=("Arial", 9),
-                         text_color=T3).pack(side="left", expand=True)
+            ctk.CTkLabel(rl, text=lbl, font=("Arial", 9), text_color=T3).pack(side="left", expand=True)
 
-        ctk.CTkFrame(right, height=1, fg_color=BORD
-                     ).grid(row=5, column=0, sticky="ew", padx=(1, 0))
+        ctk.CTkFrame(self.feed_container, height=1, fg_color=BORD).grid(row=5, column=0, sticky="ew", padx=(1, 0))
 
         # Status bar
-        bot = ctk.CTkFrame(right, height=30, fg_color="#080F1D", corner_radius=0)
+        bot = ctk.CTkFrame(self.feed_container, height=30, fg_color="#080F1D", corner_radius=0)
         bot.grid(row=6, column=0, sticky="ew", padx=(1, 0))
         bot.grid_propagate(False)
         bot.grid_columnconfigure(1, weight=1)
-        self._online_dot = ctk.CTkFrame(bot, width=8, height=8,
-                                         fg_color=GREEN, corner_radius=4)
+        self._online_dot = ctk.CTkFrame(bot, width=8, height=8, fg_color=GREEN, corner_radius=4)
         self._online_dot.grid(row=0, column=0, padx=(12, 6), pady=10)
         self._online_dot.grid_propagate(False)
 
         # status_label kept for backward compat — main.py references it
-        self.status_label = ctk.CTkLabel(
-            bot, text="Ready", font=("Arial", 10), text_color=T3, anchor="w")
+        self.status_label = ctk.CTkLabel(bot, text="Ready", font=("Arial", 10), text_color=T3, anchor="w")
         self.status_label.grid(row=0, column=1, sticky="w")
-        ctk.CTkLabel(bot, text="v1.0.0",
-                     font=("Arial", 10), text_color=T3
-                     ).grid(row=0, column=2, padx=(0, 12))
+        ctk.CTkLabel(bot, text="v1.0.0", font=("Arial", 10), text_color=T3).grid(row=0, column=2, padx=(0, 12))
+
+        # ── Alerts Container ──
+        self.alerts_container = ctk.CTkFrame(self.right_wrapper, fg_color="transparent")
+        self.alerts_container.grid_rowconfigure(2, weight=1)
+        self.alerts_container.grid_columnconfigure(0, weight=1)
+        
+        hdr_alert = ctk.CTkFrame(self.alerts_container, height=44, fg_color="transparent")
+        hdr_alert.grid(row=0, column=0, sticky="ew", padx=(1, 0))
+        hdr_alert.grid_propagate(False)
+        hdr_alert.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(hdr_alert, text="ALERT MESSAGES", font=("Arial", 10, "bold"), text_color=T3).grid(row=0, column=0, sticky="w", padx=16, pady=12)
+
+        # Toggle button in the right side of the Alerts header
+        self.alerts_to_feed_btn = ctk.CTkButton(
+            hdr_alert, text="⊞ Feed", command=self._toggle_alerts_panel,
+            font=("Arial", 11, "bold"), text_color=T3, fg_color="transparent",
+            hover_color=BG3, width=64, height=28, corner_radius=6
+        )
+        self.alerts_to_feed_btn.grid(row=0, column=1, padx=(0, 16))
+
+        ctk.CTkFrame(self.alerts_container, height=1, fg_color=BORD).grid(row=1, column=0, sticky="ew", padx=(1, 0))
+
+        self.alerts_scroll = ctk.CTkScrollableFrame(self.alerts_container, fg_color="transparent", scrollbar_button_color=BG3, corner_radius=0)
+        self.alerts_scroll.grid(row=2, column=0, sticky="nsew", padx=0)
+        self.alerts_scroll.grid_columnconfigure(0, weight=1)
+
+        self.alerts_empty = ctk.CTkLabel(self.alerts_scroll, text="No alerts received yet.", font=("Arial", 11), text_color=T3, justify="center")
+        self.alerts_empty.pack(pady=40)
 
     # ─────────────────────────────────────────────────────────
     # PUBLIC API — called by SentinelApp (main.py)
@@ -628,6 +911,59 @@ class MainWindow(ctk.CTk):
         self._update_token_dots(tokens)
         self._token_lbl.configure(text=f"{tokens} of 3 available")
 
+    def notify(self, title: str, msg: str, severity: str = "info"):
+        """Send an OS toast notification."""
+        if hasattr(self, "notifier"):
+            self.notifier.send(title, msg, severity)
+
+    def show_banner(self, msg: str, severity: str = "warn", duration_ms: int = 5000, is_admin_alert: bool = False):
+        """Show an in-app slide-down banner and optionally log it to Alerts if from Admin."""
+        if is_admin_alert:
+            import datetime
+            ts = datetime.datetime.now().strftime("%I:%M %p")
+            self._alert_history.insert(0, {"msg": msg, "severity": severity, "time": ts})
+            self._refresh_alerts_view()
+        
+        if hasattr(self, "_notif_banner"):
+            self._notif_banner.show(msg, severity, duration_ms, icon="🔔" if is_admin_alert else None)
+
+    def _refresh_alerts_view(self):
+        if not hasattr(self, 'alerts_scroll'): return
+        for child in self.alerts_scroll.winfo_children():
+            # Don't destroy the empty label yet if we plan to show it
+            if child != getattr(self, 'alerts_empty', None):
+                child.destroy()
+            
+        if not getattr(self, '_alert_history', []):
+            if hasattr(self, 'alerts_empty'):
+                self.alerts_empty.pack(pady=40)
+            return
+
+        if hasattr(self, 'alerts_empty') and self.alerts_empty.winfo_ismapped():
+            self.alerts_empty.pack_forget()
+
+        for alert in self._alert_history:
+            card = ctk.CTkFrame(self.alerts_scroll, fg_color="transparent")
+            card.pack(fill="x", pady=8, padx=12)
+            card.grid_columnconfigure(1, weight=1)
+            
+            # YouTube-style Avatar/Icon circle
+            icon_color = BLUE if alert['severity'] == 'info' else RED
+            avatar_frame = ctk.CTkFrame(card, width=36, height=36, corner_radius=18, fg_color=icon_color)
+            avatar_frame.grid(row=0, column=0, rowspan=2, sticky="n", pady=2, padx=(0, 12))
+            avatar_frame.grid_propagate(False) # lock size
+            avatar_frame.grid_columnconfigure(0, weight=1)
+            avatar_frame.grid_rowconfigure(0, weight=1)
+            
+            ctk.CTkLabel(avatar_frame, text="🔔", font=("Arial", 14), text_color="white").grid(row=0, column=0)
+            
+            # Message and Time Stack
+            ctk.CTkLabel(card, text=alert['msg'], font=("Roboto", 13), text_color=T1, justify="left", wraplength=250).grid(row=0, column=1, sticky="w", pady=(0, 4))
+            ctk.CTkLabel(card, text=alert['time'], font=("Roboto", 11), text_color=T3).grid(row=1, column=1, sticky="w")
+            
+            # YouTube-style subtle separator line at the bottom
+            ctk.CTkFrame(card, height=1, fg_color=BORD).grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+
     def add_feed_item(self, kind: str, title: str, meta: str, badge: str):
         """Add a detection event to the feed (newest at top)."""
         # Remove placeholder
@@ -665,6 +1001,19 @@ class MainWindow(ctk.CTk):
         self._feed_count_lbl.configure(text=f"{len(self._feed_items)} events")
         self._update_alert_badge()
 
+        # Always trigger in-app banner for warnings and criticals
+        if kind in ("warn", "crit"):
+            self.show_banner(f"{title} - {badge}", severity=kind, duration_ms=6000)
+            
+            # Throttle OS toasts: only ring if risk > 50 or 3 consecutive offenses
+            self._offense_count += 1
+            if self._current_risk_score > 50 or self._offense_count >= 3:
+                self.notify(title, meta, severity=kind)
+                self._offense_count = 0  # reset after ringing to avoid spam
+        elif kind == "info":
+            # Taking an action that isn't a warn/crit resets the consecutive counter
+            self._offense_count = 0
+
     def set_sync_status(self, online: bool, last_sync: str = ""):
         """Update bottom status bar and sync label."""
         try:
@@ -681,6 +1030,7 @@ class MainWindow(ctk.CTk):
         """Update risk score meter."""
         try:
             score = max(0.0, min(float(score), 100.0))
+            self._current_risk_score = score
             self.risk_val.configure(text=f"{int(score)} / 100")
             self.risk_bar.set(score / 100)
             if score < 30:

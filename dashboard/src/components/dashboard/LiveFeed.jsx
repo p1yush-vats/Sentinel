@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { auditAPI } from '../../services/api'
 import { fromNow } from '../../utils/helpers'
+import useWebSocket from '../../hooks/useWebSocket'
 
 const EVENT_CONFIG = {
   user_login:             { dot: 'bg-emerald-400', label: '🟢 Admin Logged In',          desc: (e) => e.metadata?.email || 'Admin session started' },
@@ -32,6 +33,13 @@ const DEFAULT_CONFIG = {
 export default function LiveFeed() {
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
+  
+  // Resolve base URL properly for websocket connection
+  const httpUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+  const wsBase = httpUrl.replace(/^http/, 'ws').replace(/\/api\/v1\/?$/, ''); // e.g. ws://localhost:8000
+  const wsUrl = `${wsBase}/ws/dashboard-live-feed`;
+  
+  const { lastMessage, isConnected } = useWebSocket(wsUrl)
 
   const fetchEvents = () => {
     auditAPI.getAll({ limit: 20 })
@@ -42,17 +50,32 @@ export default function LiveFeed() {
 
   useEffect(() => {
     fetchEvents()
-    const interval = setInterval(fetchEvents, 15000)
-    return () => clearInterval(interval)
+    // No more setInterval polling here! True real-time ✨
   }, [])
+
+  // Listen for real-time WebSocket events broadcasted by the backend
+  useEffect(() => {
+    if (lastMessage && lastMessage.type === 'NEW_EVENT' && lastMessage.data) {
+      setEvents(prev => [lastMessage.data, ...prev].slice(0, 20))
+    }
+  }, [lastMessage])
 
   return (
     <div className="card p-5 flex flex-col" style={{ maxHeight: '420px' }}>
       <div className="flex items-center justify-between mb-4 shrink-0">
         <h3 className="section-title">Live Feed</h3>
         <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-xs font-mono text-sentinel-muted">LIVE</span>
+          {isConnected ? (
+            <>
+              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+              <span className="text-xs font-mono text-emerald-400 font-bold tracking-wider">LIVE</span>
+            </>
+          ) : (
+            <>
+              <div className="w-2 h-2 rounded-full bg-slate-500" />
+              <span className="text-xs font-mono text-sentinel-muted">DISCONNECTED</span>
+            </>
+          )}
         </div>
       </div>
 

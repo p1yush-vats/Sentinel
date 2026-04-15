@@ -298,6 +298,7 @@ class SentinelApp:
             on_state_change=self._on_state_change,
             on_sync_error=self._on_sync_error
         )
+        self.session_manager.on_alert_received = self._on_alert_received
         self.sync_client = SyncClient(
             api_base_url=Config.API_BASE_URL,
             access_token=self.access_token,
@@ -316,6 +317,15 @@ class SentinelApp:
         )
         print("Components ready.")
 
+    def _on_alert_received(self, data: dict):
+        if self.main_window:
+            title = data.get("title", "Admin Message")
+            msg = data.get("message", "")
+            severity = data.get("severity", "crit")
+            # Thread-safe UI update
+            self.main_window.after(0, lambda: self.main_window.show_banner(f"{title}: {msg}", severity=severity, duration_ms=10000, is_admin_alert=True))
+            self.main_window.after(0, lambda: self.main_window.notifier.send(title, msg, severity=severity))
+
     def _show_main(self):
         self.main_window = MainWindow(
             user=self.user,
@@ -329,6 +339,11 @@ class SentinelApp:
         self.main_window.on_take_lunch    = self._take_lunch
         self.main_window.on_end_lunch     = self._end_lunch
         self.main_window.on_logout        = self._logout
+        
+        # Start persistent WS connection
+        if self.session_manager:
+            self.session_manager.connect_realtime()
+            
         self.main_window.mainloop()
 
         # mainloop() returned — clean up the window now that we are back

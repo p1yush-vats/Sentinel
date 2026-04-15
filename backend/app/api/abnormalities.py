@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from ..core.database import get_db
 from ..core.security import get_current_user_id, RoleChecker
+from ..core.websocket import manager
 from ..models.abnormality import Abnormality, AdminAction, SEVERITY_RANK
 from ..models.session import Session
 from .audit_log import write_audit
@@ -87,7 +88,10 @@ async def report_abnormality(
                       "confidence": float(data.confidence_score), "session_id": data.session_id})
         await db.commit()
 
-        return {"message": "Abnormality merged into session record", "abnormality": record.to_dict()}
+        payload = record.to_dict()
+        await manager.broadcast({"type": "abnormality_detected", "data": payload})
+
+        return {"message": "Abnormality merged into session record", "abnormality": payload}
 
     else:
         severity, confidence = Abnormality.recalculate_overall({data.abnormality_type: detection_payload})
@@ -113,7 +117,10 @@ async def report_abnormality(
                       "confidence": float(data.confidence_score), "session_id": data.session_id})
         await db.commit()
 
-        return {"message": "Abnormality record created", "abnormality": record.to_dict()}
+        payload = record.to_dict()
+        await manager.broadcast({"type": "abnormality_detected", "data": payload})
+
+        return {"message": "Abnormality record created", "abnormality": payload}
 
 
 @router.get("/")

@@ -5,8 +5,14 @@ Manages work/break time accounting with proper state tracking.
 Enforces 50 min work / 10 min break per hour rule.
 """
 from datetime import datetime, timedelta
+import pytz
 from enum import Enum
 from typing import Optional, Callable
+
+IST = pytz.timezone("Asia/Kolkata")
+
+def _now():
+    return datetime.now(IST)
 
 
 class SessionState(Enum):
@@ -69,7 +75,7 @@ class TimeEngine:
         if self.state != SessionState.IDLE:
             raise ValueError("Session already active")
         
-        now = datetime.now()
+        now = _now()
         self.session_start_time = now
         self.current_hour_start = now
         self.state = SessionState.WORKING
@@ -106,7 +112,7 @@ class TimeEngine:
         elif self.state == SessionState.ON_LUNCH:
             self._end_lunch()
         
-        self.session_end_time = datetime.now()
+        self.session_end_time = _now()
         prev_state = self.state
         self.state = SessionState.ENDED
         
@@ -129,7 +135,7 @@ class TimeEngine:
         self._pause_work()
         
         # Start break timer (FRESH)
-        self.break_start_time = datetime.now()
+        self.break_start_time = _now()
         self.current_break_duration = self.BREAK_MINUTES_PER_HOUR * 60  # 10 min in seconds
         self.state = SessionState.ON_BREAK
         self.break_tokens_available -= 1
@@ -154,7 +160,7 @@ class TimeEngine:
         self._end_break()
         
         # Resume work
-        self.work_start_time = datetime.now()
+        self.work_start_time = _now()
         self.state = SessionState.WORKING
         
         result = {
@@ -179,7 +185,7 @@ class TimeEngine:
         self._pause_work()
         
         # Start lunch timer (FRESH)
-        self.lunch_start_time = datetime.now()
+        self.lunch_start_time = _now()
         self.current_break_duration = self.LUNCH_DURATION_MINUTES * 60  # 30 min in seconds
         self.state = SessionState.ON_LUNCH
         
@@ -203,7 +209,7 @@ class TimeEngine:
         self.lunch_taken = True
         
         # Resume work
-        self.work_start_time = datetime.now()
+        self.work_start_time = _now()
         self.state = SessionState.WORKING
         
         result = {
@@ -224,7 +230,7 @@ class TimeEngine:
         Returns:
             Current state data
         """
-        now = datetime.now()
+        now = _now()
         
         # Check if new hour started (issue new break token)
         if self.current_hour_start and self.state == SessionState.WORKING:
@@ -248,7 +254,7 @@ class TimeEngine:
     
     def get_current_state(self) -> dict:
         """Get current state and all time data"""
-        now = datetime.now()
+        now = _now()
         
         # Calculate current work time
         work_seconds = self.total_work_seconds
@@ -300,13 +306,13 @@ class TimeEngine:
     def _pause_work(self):
         """Pause work timer (internal)"""
         if self.work_start_time:
-            self.total_work_seconds += (datetime.now() - self.work_start_time).total_seconds()
+            self.total_work_seconds += (_now() - self.work_start_time).total_seconds()
             self.work_start_time = None
     
     def _end_break(self):
         """End break timer (internal)"""
         if self.break_start_time:
-            elapsed = (datetime.now() - self.break_start_time).total_seconds()
+            elapsed = (_now() - self.break_start_time).total_seconds()
             self.total_break_seconds += elapsed
             self.break_start_time = None
             self.current_break_duration = 0  # Reset
@@ -314,7 +320,7 @@ class TimeEngine:
     def _end_lunch(self):
         """End lunch timer (internal)"""
         if self.lunch_start_time:
-            elapsed = (datetime.now() - self.lunch_start_time).total_seconds()
+            elapsed = (_now() - self.lunch_start_time).total_seconds()
             self.total_break_seconds += elapsed
             self.lunch_start_time = None
             self.current_break_duration = 0  # Reset

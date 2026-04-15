@@ -47,8 +47,17 @@ function RootRedirect() {
 }
 
 export default function App() {
-  const initAuth = useAuthStore((s) => s.initAuth)
+  const { initAuth, isInitializing } = useAuthStore()
+  
   useEffect(() => { initAuth() }, [])
+
+  if (isInitializing) {
+    return (
+      <div className="min-h-screen bg-[#020817] flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    )
+  }
 
   return (
     <ThemeProvider>

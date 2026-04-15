@@ -3,6 +3,9 @@ Session Manager
 Bridges TimeEngine with Backend API.
 """
 import httpx
+import threading
+import json
+import websocket
 from datetime import datetime
 from typing import Optional, Dict, Callable
 from core.time_engine import TimeEngine, SessionState
@@ -34,6 +37,23 @@ class SessionManager:
         self.backend_session_id: Optional[str] = None
         self.last_sync_time: Optional[datetime] = None
         self.offline_queue = []
+        self.on_alert_received: Optional[Callable] = None
+        self.ws_app: Optional[websocket.WebSocketApp] = None
+
+    def connect_realtime(self):
+        if self.ws_app: return
+        ws_url = self.api_base_url.replace("http", "ws") + f"/ws/{self.employee_id}"
+        
+        def on_message(ws, message):
+            try:
+                data = json.loads(message)
+                if data.get("type") == "admin_alert" and self.on_alert_received:
+                    self.on_alert_received(data)
+            except Exception as e:
+                print(f"WS error processing message: {e}")
+
+        self.ws_app = websocket.WebSocketApp(ws_url, on_message=on_message)
+        threading.Thread(target=self.ws_app.run_forever, daemon=True).start()
 
     def _get_headers(self) -> Dict[str, str]:
         return {
@@ -68,6 +88,7 @@ class SessionManager:
                     return {**local_session, "synced": False}
                 self.backend_session_id = session_data["id"]
                 print(f"Backend session: {self.backend_session_id}")
+                
                 return {**local_session, "backend_session_id": self.backend_session_id, "synced": True}
 
             elif response.status_code == 409:

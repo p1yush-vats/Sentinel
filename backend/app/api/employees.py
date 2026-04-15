@@ -125,3 +125,35 @@ async def delete_employee(
     await db.delete(employee)
     await db.commit()
     return {"message": "Employee deleted successfully"}
+
+
+class AdminAlert(BaseModel):
+    title: str = "Admin Message"
+    message: str
+    severity: str = "crit"
+
+@router.post("/{employee_id}/alert", dependencies=[Depends(RoleChecker(["admin"]))])
+async def alert_employee(
+    employee_id: str,
+    data:        AdminAlert,
+    db:          AsyncSession = Depends(get_db)
+):
+    from ..core.websocket import manager
+    
+    # Check if employee exists
+    result = await db.execute(select(Employee).where(Employee.id == employee_id))
+    employee = result.scalar_one_or_none()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    payload = {
+        "type": "admin_alert",
+        "title": data.title,
+        "message": data.message,
+        "severity": data.severity
+    }
+    
+    # Push WS message
+    await manager.send_personal_message(payload, employee_id)
+    
+    return {"message": "Alert sent"}

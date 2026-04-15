@@ -19,6 +19,7 @@ import {
 import toast from 'react-hot-toast'
 import SpotlightCard from '../components/ui/SpotlightCard'
 import BorderGlow from '../components/ui/BorderGlow'
+import AdminAlertModal from '../components/employee/AdminAlertModal'
 
 // ─── Tooltip ─────────────────────────────────────────────────
 const ChartTooltip = ({ active, payload, label }) => {
@@ -164,6 +165,7 @@ export default function EmployeeDetail() {
   const [loading,  setLoading]  = useState(true)
   const [tab,      setTab]      = useState('overview')
   const [toggling, setToggling] = useState(false)
+  const [alertModalOpen, setAlertModalOpen] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -314,6 +316,11 @@ export default function EmployeeDetail() {
                       ${employee.is_active ? 'border-red-500/20 text-red-400 hover:bg-red-400/10' : 'border-emerald-500/20 text-emerald-400 hover:bg-emerald-400/10'}`}>
                     {employee.is_active ? <UserX size={12} /> : <UserCheck size={12} />}
                     {toggling ? '...' : employee.is_active ? 'Deactivate' : 'Activate'}
+                  </button>
+                  <button onClick={() => setAlertModalOpen(true)}
+                    className="flex items-center gap-1.5 text-xs font-mono px-3 py-1.5 rounded-lg border border-blue-500/20 text-blue-400 hover:bg-blue-400/10 transition-all">
+                    <MessageSquare size={12} />
+                    Alert
                   </button>
                 </div>
               </div>
@@ -590,6 +597,20 @@ export default function EmployeeDetail() {
           ))}
         </div>
       )}
+
+      <AdminAlertModal 
+        isOpen={alertModalOpen} 
+        onClose={() => setAlertModalOpen(false)} 
+        employeeName={employee.full_name}
+        onSend={async (msg) => {
+          try {
+            await employeesAPI.sendAlert(employee.id, { message: msg, severity: 'crit' })
+            toast.success('Alert sent to employee desktop')
+          } catch (err) {
+            toast.error('Failed to send alert')
+          }
+        }}
+      />
     </div>
   )
 }

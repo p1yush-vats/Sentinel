@@ -1,5 +1,6 @@
 import uuid
 from typing import Optional
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, desc
@@ -8,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.database import get_db
 from ..core.security import RoleChecker
 from ..models.audit_log_model import AuditLog
+from ..core.websocket import manager
+import asyncio
 
 router = APIRouter()
 
@@ -34,6 +37,22 @@ async def write_audit(
         user_agent     = user_agent,
     )
     db.add(entry)
+    
+    # Fire and forget broadcast
+    asyncio.create_task(manager.broadcast({
+        "type": "NEW_EVENT",
+        "data": {
+            "event_type": event_type,
+            "action": action,
+            "actor_id": str(actor_id) if actor_id else None,
+            "target_id": str(target_id) if target_id else None,
+            "target_type": target_type,
+            "metadata": metadata or {},
+            "created_at": datetime.utcnow().isoformat() + "Z", # Valid ISO string for fromNow
+            "id": str(uuid.uuid4())   # temporary id for React key mapping
+        }
+    }))
+    
     # caller must await db.commit()
 
 
