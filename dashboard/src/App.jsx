@@ -17,6 +17,7 @@ import Leaves from './pages/Leaves'
 import Appeals from './pages/Appeals'
 import AuditLog from './pages/AuditLog'
 import Settings from './pages/Settings'
+import Tasks from './pages/Tasks'
 
 // Employee pages
 import MyDashboard from './employee/MyDashboard'
@@ -24,6 +25,7 @@ import MySessions from './employee/MySessions'
 import MyFlags from './employee/MyFlags'
 import MyLeave from './employee/MyLeave'
 import MyCalendar from './employee/MyCalendar'
+import MyTasks from './employee/MyTasks'
 
 function AdminRoute({ children }) {
   const { token, user } = useAuthStore()
@@ -79,6 +81,7 @@ export default function App() {
           <Route path="appeals"            element={<Appeals />} />
           <Route path="audit"              element={<AuditLog />} />
           <Route path="settings"           element={<Settings />} />
+          <Route path="tasks"              element={<Tasks />} />
         </Route>
 
         {/* Employee routes */}
@@ -89,6 +92,7 @@ export default function App() {
           <Route path="flags"     element={<MyFlags />} />
           <Route path="leave"     element={<MyLeave />} />
           <Route path="calendar"  element={<MyCalendar />} />
+          <Route path="tasks"     element={<MyTasks />} />
         </Route>
 
         <Route path="*" element={<RootRedirect />} />

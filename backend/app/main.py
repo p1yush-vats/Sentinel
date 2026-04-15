@@ -9,7 +9,7 @@ from .core.database import init_db, close_db
 from .api import (
     auth, sessions, employees, abnormalities, reports,
     appeals, audit_log, work_rules,
-    notification_preferences, productivity_metrics,leaves,
+    notification_preferences, productivity_metrics, leaves, tasks,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -105,6 +105,7 @@ app.include_router(work_rules.router,               prefix=f"{settings.API_V1_PR
 app.include_router(notification_preferences.router, prefix=f"{settings.API_V1_PREFIX}/notification-prefs",    tags=["Notification Preferences"])
 app.include_router(productivity_metrics.router,     prefix=f"{settings.API_V1_PREFIX}/productivity-metrics",  tags=["Productivity Metrics"])
 app.include_router(leaves.router, prefix=f"{settings.API_V1_PREFIX}/leaves", tags=["Leaves"])
+app.include_router(tasks.router,  prefix=f"{settings.API_V1_PREFIX}/tasks",  tags=["Tasks"])
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

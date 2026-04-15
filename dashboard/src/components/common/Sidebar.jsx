@@ -3,7 +3,7 @@ import { useAuthStore } from '../../store/authStore'
 import {
   LayoutDashboard, Users, Clock, AlertTriangle, BarChart3,
   Calendar, MessageSquare, ScrollText, Settings, LogOut, X,
-  ArrowLeftRight
+  ArrowLeftRight, CheckSquare
 } from 'lucide-react'
 import senLogo from '../../img/sen.png'
 
@@ -12,6 +12,7 @@ const NAV = [
   { to: '/employees', icon: Users,           label: 'Employees' },
   { to: '/sessions',  icon: Clock,           label: 'Sessions' },
   { to: '/flags',     icon: AlertTriangle,   label: 'Flags', badge: true },
+  { to: '/tasks',     icon: CheckSquare,     label: 'Tasks' },
   { to: '/analytics', icon: BarChart3,       label: 'Analytics' },
   { to: '/leaves',    icon: Calendar,        label: 'Leave Requests' },
   { to: '/appeals',   icon: MessageSquare,   label: 'Appeals' },

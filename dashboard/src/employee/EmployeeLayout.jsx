@@ -6,6 +6,7 @@ import { useAuthStore } from '../store/authStore'
 const NAV = [
   { path: '/my/dashboard', label: 'DASHBOARD',   short: 'HOME',     icon: '⌂' },
   { path: '/my/sessions',  label: 'MY SESSIONS',  short: 'SESSIONS', icon: '◷' },
+  { path: '/my/tasks',     label: 'MY TASKS',     short: 'TASKS',    icon: '✓' },
   { path: '/my/flags',     label: 'MY FLAGS',     short: 'FLAGS',    icon: '⚑' },
   { path: '/my/leave',     label: 'LEAVE',        short: 'LEAVE',    icon: '◻' },
   { path: '/my/calendar',  label: 'CALENDAR',     short: 'CAL',      icon: '▦' },

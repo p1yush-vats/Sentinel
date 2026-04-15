@@ -47,8 +47,11 @@ class SessionManager:
         def on_message(ws, message):
             try:
                 data = json.loads(message)
-                if data.get("type") == "admin_alert" and self.on_alert_received:
+                msg_type = data.get("type")
+                if msg_type == "admin_alert" and self.on_alert_received:
                     self.on_alert_received(data)
+                elif msg_type == "task_assigned" and getattr(self, "on_task_received", None):
+                    self.on_task_received(data)
             except Exception as e:
                 print(f"WS error processing message: {e}")
 

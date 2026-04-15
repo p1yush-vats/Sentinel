@@ -83,3 +83,20 @@ export const metricsAPI = {
 export const auditAPI = {
   getAll: (p) => api.get('/audit/', { params: p }),
 }
+
+// ── Notification Preferences ──────────────────────────────────
+export const notificationPrefsAPI = {
+  getMe:   ()  => api.get('/notification-prefs/me'),
+  updateMe: (d) => api.patch('/notification-prefs/me', d),
+}
+
+// ── Tasks ─────────────────────────────────────────────────────
+export const tasksAPI = {
+  // Admin
+  getAll:  (p)      => api.get('/tasks/all', { params: p }),
+  create:  (d)      => api.post('/tasks/', d),
+  remove:  (id)     => api.delete(`/tasks/${id}`),
+  // Employee
+  getMy:   (p)      => api.get('/tasks/my', { params: p }),
+  updateStatus: (id, d) => api.patch(`/tasks/${id}/status`, d),
+}
