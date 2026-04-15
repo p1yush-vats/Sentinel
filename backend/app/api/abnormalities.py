@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
@@ -12,7 +12,9 @@ from ..core.security import get_current_user_id, RoleChecker
 from ..core.websocket import manager
 from ..models.abnormality import Abnormality, AdminAction, SEVERITY_RANK
 from ..models.session import Session
+from ..models.employee import Employee
 from .audit_log import write_audit
+from ..tasks.email_tasks import send_flag_warning, send_flag_escalation
 
 router = APIRouter()
 
@@ -79,6 +81,11 @@ async def report_abnormality(
     if record:
         record.merge_detection(data.abnormality_type, detection_payload)
         record.last_updated_at = now
+
+        # Sync session risk_score (0–100 scale) every time new data merges in
+        new_risk = min(round(float(record.confidence_score) * 100, 2), 100.0)
+        session.risk_score = new_risk
+
         await db.commit()
         await db.refresh(record)
 
@@ -108,7 +115,8 @@ async def report_abnormality(
         await db.commit()
         await db.refresh(record)
 
-        session.risk_score = float(confidence)
+        # Store on 0–100 scale to match what the desktop sync writes at session end
+        session.risk_score = min(round(confidence * 100, 2), 100.0)
         await db.commit()
 
         await write_audit(db, "abnormality_detected", "create_abnormality",
@@ -148,11 +156,14 @@ async def get_unreviewed_abnormalities(
     db:             AsyncSession = Depends(get_db),
     limit:          int   = Query(100, ge=1, le=500),
     offset:         int   = Query(0, ge=0),
-    min_confidence: Optional[float] = Query(None, ge=0, le=1)
+    min_confidence: Optional[float] = Query(None, ge=0, le=1),
+    employee_id:    Optional[str] = None
 ):
     query = select(Abnormality).where(Abnormality.reviewed == False)
     if min_confidence is not None:
         query = query.where(Abnormality.confidence_score >= min_confidence)
+    if employee_id:
+        query = query.where(Abnormality.employee_id == employee_id)
     query = query.order_by(desc(Abnormality.overall_severity), desc(Abnormality.last_updated_at)).limit(limit).offset(offset)
     result = await db.execute(query)
     records = result.scalars().all()
@@ -176,6 +187,7 @@ async def get_abnormality(
 async def review_abnormality(
     abnormality_id: str,
     review_data:    AbnormalityReview,
+    background_tasks: BackgroundTasks,
     admin_id:       str = Depends(get_current_user_id),
     db:             AsyncSession = Depends(get_db)
 ):
@@ -197,6 +209,14 @@ async def review_abnormality(
         metadata={"abnormality_id": abnormality_id, "decision": review_data.decision,
                   "session_id": str(record.session_id), "severity": record.overall_severity})
     await db.commit()
+
+    employee = await db.scalar(select(Employee).where(Employee.id == record.employee_id))
+    if employee:
+        note = f"Your activity on session {record.session_id} was reviewed."
+        if review_data.decision == "warn":
+            background_tasks.add_task(send_flag_warning, employee.email, employee.full_name, note)
+        elif review_data.decision == "escalate":
+            background_tasks.add_task(send_flag_escalation, employee.email, employee.full_name, note)
 
     return {"message": "Review saved", "abnormality": record.to_dict()}
 

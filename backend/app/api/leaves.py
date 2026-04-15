@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone, date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
@@ -12,6 +12,7 @@ from ..core.security import get_current_user_id, RoleChecker
 from ..models.leave import Leave
 from ..models.employee import Employee
 from .audit_log import write_audit
+from ..tasks.email_tasks import send_leave_decision
 
 router = APIRouter()
 
@@ -128,6 +129,7 @@ async def get_all_leaves(
 async def review_leave(
     leave_id: str,
     review:   LeaveReview,
+    background_tasks: BackgroundTasks,
     admin_id: str = Depends(get_current_user_id),
     db:       AsyncSession = Depends(get_db),
 ):
@@ -152,6 +154,10 @@ async def review_leave(
         actor_id=admin_id, target_id=str(leave.employee_id), target_type="leave",
         metadata={"leave_id": leave_id, "decision": review.status, "leave_type": leave.leave_type})
     await db.commit()
+
+    employee = await db.scalar(select(Employee).where(Employee.id == leave.employee_id))
+    if employee:
+        background_tasks.add_task(send_leave_decision, employee.email, employee.full_name, review.status, review.admin_response)
 
     return {"message": "Leave reviewed", "leave": leave.to_dict()}
 

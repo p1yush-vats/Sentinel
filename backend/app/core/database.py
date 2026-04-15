@@ -7,10 +7,10 @@ PGBOUNCER FIX:
   default, causing DuplicatePreparedStatementError on every request
   after the first.
 
-  Fix: pass statement_cache_size=0 and prepared_statement_cache_size=0
-  via the asyncpg connect_args. The SQLAlchemy-level compiled_cache
-  must also be disabled. NullPool prevents connection reuse which would
-  otherwise re-trigger the conflict.
+  Fix: statement_cache_size=0 disables asyncpg's cache. The name func
+  uses UUID4 so names are unique across server restarts — a sequential
+  counter would reset to 0 on hot-reload and collide with pgbouncer's
+  cached names from the previous process.
 """
 from sqlalchemy.ext.asyncio import (
     create_async_engine,
@@ -20,30 +20,27 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool
 from .config import settings
-import itertools
-_stmt_counter = itertools.count()
+import uuid
+
 
 def _make_engine():
     """
     Build the async engine with all pgbouncer-safe settings.
 
     Key settings:
-      - NullPool          : no connection pooling on our side
-                            (pgbouncer handles it)
-      - statement_cache_size=0          : asyncpg level — no prepared stmts
-      - prepared_statement_cache_size=0 : asyncpg level (redundant but safe)
-      - prepared_statement_name_func    : makes every statement name unique
-                                          so there's never a collision even
-                                          if the cache somehow fires
-      - jit=off           : Supabase/pgbouncer edge-case stability
+      - NullPool                        : no pooling on our side
+      - statement_cache_size=0          : asyncpg — no prepared stmts
+      - prepared_statement_cache_size=0 : asyncpg (redundant but safe)
+      - prepared_statement_name_func    : UUID per statement, unique across
+                                          hot-reloads and parallel workers
+      - jit=off                         : Supabase/pgbouncer stability
     """
     connect_args = {
         "statement_cache_size": 0,
         "prepared_statement_cache_size": 0,
-        # Give every prepared statement a globally unique name so that
-        # even if pgbouncer leaks one across a connection, it won't
-        # collide with the next request's statement.
-        "prepared_statement_name_func": lambda: f"__s_{next(_stmt_counter)}__",
+        # UUID4 hex = 32 chars, globally unique, never collides with
+        # pgbouncer's leftover names from a previous server process.
+        "prepared_statement_name_func": lambda: f"__rs_{uuid.uuid4().hex}__",
         "server_settings": {
             "jit": "off",
             "application_name": "sentinel_backend",
@@ -54,14 +51,8 @@ def _make_engine():
         settings.DATABASE_URL,
         echo=settings.DEBUG,
         future=True,
-        # NullPool = a new connection per request; pgbouncer pools them
-        # externally. This avoids the "already exists" clash that happens
-        # when SQLAlchemy reuses a connection whose prepared-statement
-        # cache is out of sync with pgbouncer's view.
         poolclass=NullPool,
         connect_args=connect_args,
-        # Disable SQLAlchemy's own compiled query cache — it can emit the
-        # same prepared-statement name on different connections.
         execution_options={"compiled_cache": None},
     )
 

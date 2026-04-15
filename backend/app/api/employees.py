@@ -1,14 +1,67 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 
 from ..core.database import get_db
 from ..core.security import get_current_user_id, RoleChecker, get_password_hash
 from ..models.employee import Employee
+from ..models.session import Session
+from ..models.abnormality import Abnormality
 
 router = APIRouter()
+
+
+# ── Risk helpers ──────────────────────────────────────────────────────────────
+
+async def _compute_employee_risk(db: AsyncSession, employee_id: str) -> float:
+    """
+    Compute a recency-weighted risk score (0–100) from the employee's last 10
+    completed sessions.
+
+    Weighting:
+      - The 5 most recent sessions count at 2× weight
+      - The 5 older sessions count at 1× weight
+
+    This makes the score responsive to recent behaviour: one bad session
+    spikes the score quickly; a run of clean sessions brings it back down.
+    Returns 0.0 if the employee has no sessions yet.
+    """
+    q = (
+        select(Session.risk_score)
+        .where(
+            Session.employee_id == employee_id,
+            Session.status == "completed",
+            Session.risk_score.isnot(None),
+        )
+        .order_by(desc(Session.start_time))
+        .limit(10)
+    )
+    result = await db.execute(q)
+    scores = [float(row[0]) for row in result.fetchall()]
+
+    if not scores:
+        return 0.0
+
+    # Recency weighting: index 0 = newest
+    total_w, total_s = 0.0, 0.0
+    for i, score in enumerate(scores):
+        weight = 2.0 if i < 5 else 1.0
+        total_s += score * weight
+        total_w += weight
+
+    return round(total_s / total_w, 1) if total_w > 0 else 0.0
+
+
+async def _count_unreviewed_flags(db: AsyncSession, employee_id: str) -> int:
+    """Return the count of unreviewed abnormality records for this employee."""
+    q = select(func.count()).where(
+        Abnormality.employee_id == employee_id,
+        Abnormality.reviewed == False,  # noqa: E712
+    )
+    result = await db.execute(q)
+    return result.scalar() or 0
 
 
 class EmployeeCreate(BaseModel):
@@ -50,7 +103,15 @@ async def get_employees(
     query = query.order_by(desc(Employee.created_at)).limit(limit).offset(offset)
     result = await db.execute(query)
     employees = result.scalars().all()
-    return {"employees": [e.to_dict() for e in employees], "total": len(employees)}
+
+    # Compute risk_score per employee from last 10 sessions
+    employee_dicts = []
+    for emp in employees:
+        d = emp.to_dict()
+        d["risk_score"] = await _compute_employee_risk(db, str(emp.id))
+        employee_dicts.append(d)
+
+    return {"employees": employee_dicts, "total": len(employee_dicts)}
 
 
 @router.get("/{employee_id}")
@@ -63,7 +124,11 @@ async def get_employee(
     employee = result.scalar_one_or_none()
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
-    return employee.to_dict()
+
+    d = employee.to_dict()
+    d["risk_score"]       = await _compute_employee_risk(db, employee_id)
+    d["unreviewed_flags"] = await _count_unreviewed_flags(db, employee_id)
+    return d
 
 
 @router.post("/", dependencies=[Depends(RoleChecker(["admin"]))])

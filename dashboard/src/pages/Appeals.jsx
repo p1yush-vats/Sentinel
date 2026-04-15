@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { appealsAPI, employeesAPI } from '../services/api'
 import { fromNow, initials, deptColor } from '../utils/helpers'
@@ -52,6 +52,14 @@ export default function Appeals() {
     finally { setActing(null) }
   }
 
+  const sortedAppeals = useMemo(() => {
+    return [...appeals].sort((a, b) => {
+      if (a.status === 'pending' && b.status !== 'pending') return -1
+      if (b.status === 'pending' && a.status !== 'pending') return 1
+      return new Date(b.created_at) - new Date(a.created_at)
+    })
+  }, [appeals])
+
   return (
     <div className="space-y-5">
       <div className="animate-fade-in">
@@ -90,13 +98,14 @@ export default function Appeals() {
             <p className="font-display font-semibold text-sentinel-text">No {filter === 'all' ? '' : filter} appeals</p>
           </div>
         ) : (
-          appeals.map((appeal, i) => {
+          sortedAppeals.map((appeal, i) => {
             const emp   = employees[appeal.employee_id]
             const color = deptColor(emp?.department)
+            const isPending = appeal.status === 'pending'
 
             return (
               <div key={appeal.id}
-                className={`card p-5 transition-all duration-200 ${expanded === appeal.id ? 'border-cyan-400/15' : ''}`}>
+                className={`card p-5 transition-all duration-200 ${expanded === appeal.id ? 'border-cyan-400/15' : ''} ${isPending ? 'hover:border-amber-400/20' : ''}`}>
                 <div className="flex items-start gap-3">
                   {/* Avatar — clickable */}
                   {emp?.avatar_url ? (

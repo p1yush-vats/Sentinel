@@ -115,7 +115,22 @@ export default function Analytics() {
       }
     })
     return Object.values(map).filter(e => e.totalWork > 0)
-      .sort((a, b) => b.totalWork - a.totalWork).slice(0, 8)
+      .sort((a, b) => b.totalWork - a.totalWork).slice(0, 5)
+  }, [employees, filteredSessions])
+
+  // ── Highest Risk Employees ──────────────────────────────────
+  const riskWorkers = useMemo(() => {
+    const map = {}
+    employees.forEach(e => { map[e.id] = { ...e, totalRisk: 0, sessionCount: 0 } })
+    filteredSessions.forEach(s => {
+      if (map[s.employee_id] && s.risk_score > 0) {
+        map[s.employee_id].totalRisk += s.risk_score
+        map[s.employee_id].sessionCount += 1
+      }
+    })
+    return Object.values(map).filter(e => e.sessionCount > 0)
+      .map(e => ({ ...e, avgRisk: Math.round(e.totalRisk / e.sessionCount) }))
+      .sort((a, b) => b.avgRisk - a.avgRisk).slice(0, 5)
   }, [employees, filteredSessions])
 
   // ── Daily sessions trend ──────────────────────────────────
@@ -146,6 +161,21 @@ export default function Analytics() {
     { name: 'Flagged',   value: filteredSessions.filter(s => s.status === 'flagged').length,   color: '#ef4444' },
     { name: 'Abandoned', value: filteredSessions.filter(s => s.status === 'abandoned').length, color: '#64748b' },
   ].filter(d => d.value > 0), [filteredSessions])
+
+  // ── Anomaly types ──────────────────────────────────────────
+  const anomalyStats = useMemo(() => {
+    const map = {}
+    filteredFlags.forEach(f => {
+      Object.entries(f.detections || {}).forEach(([k, v]) => {
+        if (!map[k]) map[k] = 0
+        map[k] += (v.occurrences || 1)
+      })
+    })
+    return Object.entries(map)
+      .map(([name, value]) => ({ name: name.replace(/_/g, ' '), value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5)
+  }, [filteredFlags])
 
   // ── Radar — org-level metrics ──────────────────────────────
   const radarData = useMemo(() => {
@@ -256,19 +286,38 @@ export default function Analytics() {
 
       {/* Dept avg work + session distribution */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 animate-fade-in stagger-3">
-        <div className="xl:col-span-2 card p-5">
-          <h3 className="section-title mb-1">Avg Work Minutes by Department</h3>
-          <p className="text-[11px] font-mono text-sentinel-muted mb-4">Minutes per session average</p>
+        <div className="card p-5">
+          <h3 className="section-title mb-1">Avg Work Minutes</h3>
+          <p className="text-[11px] font-mono text-sentinel-muted mb-4">Minutes per session by department</p>
           {loading ? <div className="h-48 bg-navy-700 rounded animate-pulse" /> : deptStats.length === 0 ? (
             <p className="text-sentinel-muted text-sm font-mono text-center py-12">No data for this period</p>
           ) : (
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={deptStats} barSize={28}>
-                <XAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'IBM Plex Mono' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'IBM Plex Mono' }} axisLine={false} tickLine={false} unit=" min" />
-                <Tooltip content={<CustomTooltip />} />
+              <BarChart data={deptStats} barSize={28} margin={{ bottom: 45 }}>
+                <XAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'IBM Plex Mono' }} axisLine={false} tickLine={false} interval={0} angle={-35} textAnchor="end" dx={-5} dy={10} />
+                <YAxis tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'IBM Plex Mono' }} axisLine={false} tickLine={false} unit="m" width={30} />
+                <Tooltip content={<CustomTooltip />} cursor={{ fill: '#1e293b', opacity: 0.6 }} />
                 <Bar dataKey="avgWork" name="Avg Work (min)" radius={[4, 4, 0, 0]}>
                   {deptStats.map((_, i) => <Cell key={i} fill={DEPT_COLORS[i % DEPT_COLORS.length]} opacity={0.85} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        <div className="card p-5">
+          <h3 className="section-title mb-1">Anomaly Hotspots</h3>
+          <p className="text-[11px] font-mono text-sentinel-muted mb-4">Top 5 risk flags</p>
+          {loading ? <div className="h-48 bg-navy-700 rounded animate-pulse" /> : anomalyStats.length === 0 ? (
+            <p className="text-sentinel-muted text-sm font-mono text-center py-12">No anomalies detected</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={anomalyStats} barSize={24} layout="vertical" margin={{ left: -5, top: 10, right: 15 }}>
+                <XAxis type="number" hide />
+                <YAxis dataKey="name" type="category" tick={{ fill: '#94a3b8', fontSize: 10, fontFamily: 'IBM Plex Mono' }} axisLine={false} tickLine={false} width={125} />
+                <Tooltip content={<CustomTooltip />} cursor={{ fill: '#1e293b', opacity: 0.6 }} />
+                <Bar dataKey="value" name="Occurrences" radius={[0, 4, 4, 0]}>
+                  {anomalyStats.map((_, i) => <Cell key={i} fill="#ef4444" opacity={0.85 - (i * 0.1)} />)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -295,49 +344,110 @@ export default function Analytics() {
         </div>
       </div>
 
-      {/* Top performers */}
-      <div className="card p-5 animate-fade-in stagger-4">
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="section-title">Top Performers</h3>
-          <span className="label">{PERIODS.find(p => p.key === period)?.label}</span>
+      {/* Leaderboards */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 animate-fade-in stagger-4">
+        {/* Top performers */}
+        <div className="card p-5">
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="section-title">Top Performers (Work)</h3>
+            <span className="label">{PERIODS.find(p => p.key === period)?.label}</span>
+          </div>
+          {loading ? (
+            Array(5).fill(0).map((_, i) => (
+              <div key={i} className="flex items-center gap-4 py-3 border-b border-sentinel-border/30">
+                <div className="w-6 h-6 bg-navy-700 rounded animate-pulse" />
+                <div className="flex-1 h-4 bg-navy-700 rounded animate-pulse" />
+              </div>
+            ))
+          ) : topWorkers.length === 0 ? (
+            <p className="text-sentinel-muted text-sm font-mono text-center py-8">No data for this period</p>
+          ) : topWorkers.map((emp, i) => {
+            const maxWork = topWorkers[0]?.totalWork || 1
+            const pct = (emp.totalWork / maxWork) * 100
+            const c = deptColor(emp.department)
+            return (
+              <div key={emp.id} className="flex items-center gap-4 py-3 border-b border-sentinel-border/30 last:border-0 hover:bg-navy-800/50 transition-colors px-2 rounded -mx-2">
+                <span className={`font-mono font-bold text-sm w-6 text-center shrink-0
+                  ${i === 0 ? 'text-emerald-400' : i === 1 ? 'text-emerald-500' : i === 2 ? 'text-emerald-600' : 'text-sentinel-muted'}`}>
+                  {i + 1}
+                </span>
+                {emp.avatar_url ? (
+                  <img src={emp.avatar_url} alt={emp.full_name} className="w-8 h-8 rounded-full object-cover border shrink-0" style={{ borderColor: c + '50' }} onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex' }} />
+                ) : null}
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-mono font-bold shrink-0 ${emp.avatar_url ? 'hidden' : ''}`}
+                  style={{ backgroundColor: c + '20', color: c, border: `1px solid ${c}30` }}>
+                  {initials(emp.full_name)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1 gap-2">
+                    <span className="text-sm font-medium text-sentinel-text truncate">{emp.full_name}</span>
+                    <span className="font-mono text-xs text-sentinel-muted shrink-0 flex gap-2">
+                      <span className="text-emerald-400 font-bold">{fmtMins(emp.totalWork)}</span>
+                      <span>({emp.sessionCount} sess)</span>
+                    </span>
+                  </div>
+                  <div className="h-1.5 bg-navy-900 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-700"
+                      style={{ width: `${pct}%`, backgroundColor: '#10b981' }} />
+                  </div>
+                </div>
+              </div>
+            )
+          })}
         </div>
-        {loading ? (
-          Array(5).fill(0).map((_, i) => (
-            <div key={i} className="flex items-center gap-4 py-3 border-b border-sentinel-border/30">
-              <div className="w-6 h-6 bg-navy-700 rounded animate-pulse" />
-              <div className="flex-1 h-4 bg-navy-700 rounded animate-pulse" />
-            </div>
-          ))
-        ) : topWorkers.length === 0 ? (
-          <p className="text-sentinel-muted text-sm font-mono text-center py-8">No data for this period</p>
-        ) : topWorkers.map((emp, i) => {
-          const maxWork = topWorkers[0]?.totalWork || 1
-          const pct = (emp.totalWork / maxWork) * 100
-          const c = deptColor(emp.department)
-          return (
-            <div key={emp.id} className={`flex items-center gap-4 py-3 border-b border-sentinel-border/30 last:border-0 animate-fade-in stagger-${Math.min(i+1,5)}`}>
-              <span className={`font-mono font-bold text-sm w-6 text-center shrink-0
-                ${i === 0 ? 'text-amber-400' : i === 1 ? 'text-slate-300' : i === 2 ? 'text-amber-700' : 'text-sentinel-muted'}`}>
-                {i + 1}
-              </span>
-              <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-mono font-bold shrink-0"
-                style={{ backgroundColor: c + '20', color: c, border: `1px solid ${c}30` }}>
-                {initials(emp.full_name)}
+
+        {/* Highest Risk */}
+        <div className="card p-5 relative overflow-hidden">
+          {/* Subtle danger gradient background for the risk card */}
+          <div className="absolute top-0 right-0 w-64 h-64 bg-red-500/5 rounded-full blur-3xl pointer-events-none -translate-y-1/2 translate-x-1/3" />
+          
+          <div className="flex items-center justify-between mb-5 relative">
+            <h3 className="section-title text-red-100 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              Highest Risk Employees
+            </h3>
+            <span className="label">{PERIODS.find(p => p.key === period)?.label}</span>
+          </div>
+          {loading ? (
+            Array(5).fill(0).map((_, i) => (
+              <div key={i} className="flex items-center gap-4 py-3 border-b border-sentinel-border/30">
+                <div className="w-6 h-6 bg-navy-700 rounded animate-pulse" />
+                <div className="flex-1 h-4 bg-navy-700 rounded animate-pulse" />
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between mb-1 gap-2">
-                  <span className="text-sm text-sentinel-text truncate">{emp.full_name}</span>
-                  <span className="font-mono text-xs text-sentinel-muted shrink-0">{fmtMins(emp.totalWork)}</span>
+            ))
+          ) : riskWorkers.length === 0 ? (
+            <p className="text-sentinel-muted text-sm font-mono text-center py-8">No risk data for this period</p>
+          ) : riskWorkers.map((emp, i) => {
+            const pct = Math.min(100, Math.max(5, (emp.avgRisk / 100) * 100))
+            return (
+              <div key={emp.id} className="flex items-center gap-4 py-3 border-b border-sentinel-border/30 last:border-0 hover:bg-red-950/20 transition-colors px-2 rounded -mx-2 relative z-10">
+                <span className={`font-mono font-bold text-sm w-6 text-center shrink-0
+                  ${i === 0 ? 'text-red-500' : i === 1 ? 'text-red-400' : i === 2 ? 'text-red-300' : 'text-sentinel-muted'}`}>
+                  {i + 1}
+                </span>
+                {emp.avatar_url ? (
+                  <img src={emp.avatar_url} alt={emp.full_name} className="w-8 h-8 rounded-full object-cover border border-red-500/20 shrink-0" onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex' }} />
+                ) : null}
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-mono font-bold shrink-0 border border-red-500/20 bg-red-500/10 text-red-400 ${emp.avatar_url ? 'hidden' : ''}`}>
+                  {initials(emp.full_name)}
                 </div>
-                <div className="h-1.5 bg-navy-900 rounded-full overflow-hidden">
-                  <div className="h-full rounded-full transition-all duration-700"
-                    style={{ width: `${pct}%`, backgroundColor: c }} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1 gap-2">
+                    <span className="text-sm font-medium text-sentinel-text truncate">{emp.full_name}</span>
+                    <span className="font-mono text-xs text-sentinel-muted shrink-0 flex gap-2">
+                      <span className="text-red-400 font-bold">{emp.avgRisk}/100</span>
+                      <span>({emp.sessionCount} sess)</span>
+                    </span>
+                  </div>
+                  <div className="h-1.5 bg-navy-900 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-700"
+                      style={{ width: `${pct}%`, backgroundColor: '#ef4444' }} />
+                  </div>
                 </div>
               </div>
-              <span className="text-xs font-mono text-sentinel-muted shrink-0">{emp.sessionCount} sess.</span>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
     </div>
   )

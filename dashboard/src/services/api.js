@@ -99,4 +99,9 @@ export const tasksAPI = {
   // Employee
   getMy:   (p)      => api.get('/tasks/my', { params: p }),
   updateStatus: (id, d) => api.patch(`/tasks/${id}/status`, d),
+}
+
+// ── Reports ───────────────────────────────────────────────────
+export const reportsAPI = {
+  downloadDossier: (id) => api.get(`/reports/employee/${id}/dossier`, { responseType: 'blob' }),
 }

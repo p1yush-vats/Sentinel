@@ -27,6 +27,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Callable, List
 import sys
+import httpx
 import threading
 import urllib.request
 import io
@@ -363,12 +364,18 @@ class MainWindow(ctk.CTk):
         
         self._nav_btns = {}
         self._nav_btns["dashboard"] = NavButton(
-            nav, "Dashboard", "⊞", active=True,
+            nav, "Session", "⊞", active=True,
             command=lambda: self._show_view("dashboard"))
         self._nav_btns["dashboard"].pack(fill="x", pady=2)
 
+        self._nav_btns["tasks"] = NavButton(
+            nav, "Tasks", "✓",
+            command=lambda: self._show_view("tasks"))
+        self._nav_btns["tasks"].pack(fill="x", pady=2)
+
         # ── Portal shortcut tabs (open employee portal in default browser) ──
         portal_items = [
+            ("portal",    "Dashboard",       "◈", "my/dashboard"),
             ("history",   "Session History", "○", "my/sessions"),
             ("calendar",  "My Calendar",     "▦", "my/calendar"),
             ("myleave",   "Leave & Appeals", "⇑", "my/leave"),
@@ -523,7 +530,7 @@ class MainWindow(ctk.CTk):
         self._notif_banner = _NotificationBanner(self.content_container)
         # starts hidden; shown by show_banner()
 
-        # Dashboard View (the only native view)
+        # Dashboard View
         self.dashboard_frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
         self.dashboard_frame.grid_rowconfigure(0, weight=1)
         self.dashboard_frame.grid_columnconfigure(0, weight=1)
@@ -531,6 +538,14 @@ class MainWindow(ctk.CTk):
         self._alert_history = []
         self._build_left(self.dashboard_frame)
         self._build_right(self.dashboard_frame)
+
+        # Tasks View
+        self.tasks_frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
+        self.tasks_frame.grid_rowconfigure(1, weight=1)
+        self.tasks_frame.grid_columnconfigure(0, weight=1)
+        self._tasks_data = []
+        self._tasks_loading = False
+        self._build_tasks_view()
 
         self._show_view("dashboard")
 
@@ -545,8 +560,11 @@ class MainWindow(ctk.CTk):
             self._right_panel_view = "feed"
 
     def _show_view(self, view_name: str):
-        for f in [self.dashboard_frame]:
-            f.grid_remove()
+        for f in [self.dashboard_frame, self.tasks_frame]:
+            try:
+                f.grid_remove()
+            except Exception:
+                pass
 
         # Reset nav buttons
         if hasattr(self, '_nav_btns'):
@@ -558,6 +576,9 @@ class MainWindow(ctk.CTk):
 
         if view_name == "dashboard":
             self.dashboard_frame.grid(row=1, column=0, sticky="nsew")
+        elif view_name == "tasks":
+            self.tasks_frame.grid(row=1, column=0, sticky="nsew")
+            self._fetch_tasks()
 
         if hasattr(self, '_nav_btns') and view_name in self._nav_btns:
             btn = self._nav_btns[view_name]
@@ -569,6 +590,299 @@ class MainWindow(ctk.CTk):
                     else:
                         ch.configure(text_color=T1)
 
+
+    # ── Tasks View ───────────────────────────────────────────
+    def _build_tasks_view(self):
+        """Build the native Tasks tab."""
+        tf = self.tasks_frame
+
+        # Header bar
+        hdr = ctk.CTkFrame(tf, height=56, fg_color=BG1, corner_radius=0)
+        hdr.grid(row=0, column=0, sticky="ew")
+        hdr.grid_propagate(False)
+        hdr.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(hdr, text="MY TASKS",
+                     font=("Arial", 14, "bold"), text_color=T1
+                     ).grid(row=0, column=0, padx=20, pady=14, sticky="w")
+        ctk.CTkLabel(hdr, text="Assigned by your manager",
+                     font=("Arial", 10), text_color=T3
+                     ).grid(row=0, column=1, padx=0, pady=14, sticky="w")
+
+        self._tasks_refresh_btn = ctk.CTkButton(
+            hdr, text="↻ Refresh", width=80, height=28, corner_radius=6,
+            font=("Arial", 10, "bold"), fg_color=BG3, hover_color=BORD2,
+            text_color=T2, border_width=0,
+            command=lambda: self._fetch_tasks())
+        self._tasks_refresh_btn.grid(row=0, column=2, padx=(0, 20), pady=14)
+
+        # Scrollable task list
+        self._tasks_scroll = ctk.CTkScrollableFrame(
+            tf, fg_color=BG0, corner_radius=0, scrollbar_button_color=BG3)
+        self._tasks_scroll.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
+        self._tasks_scroll.grid_columnconfigure(0, weight=1)
+
+        # Placeholder
+        self._tasks_empty = ctk.CTkLabel(
+            self._tasks_scroll,
+            text="No tasks assigned\nYou're all caught up ✓",
+            font=("Arial", 12), text_color=T3, justify="center")
+        self._tasks_empty.grid(row=0, column=0, pady=60)
+
+    # ── Task Cards ──────────────────────────────────────────
+    _PRIORITY_COLORS = {
+        "low":    {"dot": GREEN, "bg": G_BG, "bd": G_BD},
+        "medium": {"dot": AMBER, "bg": A_BG, "bd": A_BD},
+        "high":   {"dot": "#F97316", "bg": "#1A1000", "bd": "#3B2200"},
+        "urgent": {"dot": RED,   "bg": R_BG, "bd": R_BD},
+    }
+
+    def _render_tasks(self):
+        """Destroy old task cards and render fresh from self._tasks_data."""
+        for w in self._tasks_scroll.winfo_children():
+            w.destroy()
+
+        if not self._tasks_data:
+            self._tasks_empty = ctk.CTkLabel(
+                self._tasks_scroll,
+                text="No tasks assigned\nYou're all caught up ✓",
+                font=("Arial", 12), text_color=T3, justify="center")
+            self._tasks_empty.grid(row=0, column=0, pady=60)
+            return
+
+        for idx, task in enumerate(self._tasks_data):
+            self._render_task_card(idx, task)
+
+    def _render_task_card(self, idx: int, task: dict):
+        """Render a single task card."""
+        pc = self._PRIORITY_COLORS.get(task.get("priority", "medium"),
+                                        self._PRIORITY_COLORS["medium"])
+        is_done = task.get("status") == "completed"
+        is_active = task.get("status") == "in_progress"
+
+        card = ctk.CTkFrame(
+            self._tasks_scroll,
+            fg_color=G_BG if is_done else BG2,
+            border_color=G_BD if is_done else BORD,
+            border_width=1, corner_radius=10)
+        card.grid(row=idx, column=0, sticky="ew", padx=16, pady=(8, 0))
+        card.grid_columnconfigure(1, weight=1)
+
+        # Priority dot
+        dot = ctk.CTkFrame(card, width=10, height=10,
+                            fg_color=pc["dot"], corner_radius=5)
+        dot.grid(row=0, column=0, rowspan=3, padx=(14, 8), pady=14, sticky="n")
+        dot.grid_propagate(False)
+
+        # Title row
+        title_f = ctk.CTkFrame(card, fg_color="transparent")
+        title_f.grid(row=0, column=1, sticky="ew", padx=(0, 12), pady=(12, 0))
+        title_f.grid_columnconfigure(0, weight=1)
+
+        title_color = GREEN if is_done else T1
+        ctk.CTkLabel(title_f, text=task.get("title", "Untitled"),
+                     font=("Arial", 12, "bold"), text_color=title_color,
+                     anchor="w").grid(row=0, column=0, sticky="w")
+
+        # Priority badge
+        pri_text = task.get("priority", "medium").upper()
+        ctk.CTkLabel(title_f, text=pri_text,
+                     font=("Arial", 8, "bold"), text_color=pc["dot"],
+                     fg_color=pc["bg"], corner_radius=4, padx=6, pady=1
+                     ).grid(row=0, column=1, padx=(8, 0))
+
+        # Status badge
+        status_map = {"pending": ("PENDING", T3, BG3),
+                      "in_progress": ("IN PROGRESS", BLUE, "#0D1F3E"),
+                      "completed": ("COMPLETED", GREEN, G_BG)}
+        st_label, st_color, st_bg = status_map.get(
+            task.get("status", "pending"), ("PENDING", T3, BG3))
+        ctk.CTkLabel(title_f, text=st_label,
+                     font=("Arial", 8, "bold"), text_color=st_color,
+                     fg_color=st_bg, corner_radius=4, padx=6, pady=1
+                     ).grid(row=0, column=2, padx=(6, 0))
+
+        # Description (if any)
+        desc = task.get("description", "")
+        if desc:
+            ctk.CTkLabel(card, text=desc[:120] + ("…" if len(desc) > 120 else ""),
+                         font=("Arial", 10), text_color=T3, anchor="w",
+                         wraplength=450
+                         ).grid(row=1, column=1, sticky="w", padx=(0, 12), pady=(2, 0))
+
+        # Meta row: due date, completion note
+        meta_f = ctk.CTkFrame(card, fg_color="transparent")
+        meta_f.grid(row=2, column=1, sticky="w", padx=(0, 12), pady=(4, 12))
+
+        due = task.get("due_date")
+        if due:
+            try:
+                d = datetime.fromisoformat(due.replace("Z", "+00:00"))
+                due_str = d.strftime("%b %d")
+            except Exception:
+                due_str = due[:10]
+            ctk.CTkLabel(meta_f, text=f"DUE: {due_str}",
+                         font=("Arial", 9), text_color=T3).pack(side="left", padx=(0, 12))
+
+        if is_done and task.get("completion_note"):
+            ctk.CTkLabel(meta_f, text=f'Note: "{task["completion_note"]}"',
+                         font=("Arial", 9), text_color=GREEN).pack(side="left")
+
+        # Action buttons (not shown for completed tasks)
+        if not is_done:
+            btn_f = ctk.CTkFrame(card, fg_color="transparent")
+            btn_f.grid(row=0, column=2, rowspan=3, padx=(0, 14), pady=14, sticky="ne")
+
+            if not is_active:
+                ctk.CTkButton(
+                    btn_f, text="START", width=60, height=28, corner_radius=6,
+                    font=("Arial", 9, "bold"),
+                    fg_color="#0D1F3E", hover_color="#16305A",
+                    text_color=BLUE, border_color="#1E3A6E", border_width=1,
+                    command=lambda tid=task["id"]: self._task_action(tid, "in_progress")
+                ).pack(pady=(0, 4))
+
+            ctk.CTkButton(
+                btn_f, text="DONE ✓", width=60, height=28, corner_radius=6,
+                font=("Arial", 9, "bold"),
+                fg_color=G_BG, hover_color="#0F2A1A",
+                text_color=GREEN, border_color=G_BD, border_width=1,
+                command=lambda tid=task["id"], ttl=task.get("title", ""): self._task_complete_dialog(tid, ttl)
+            ).pack()
+
+    # ── Task API calls ──────────────────────────────────────
+    def _fetch_tasks(self):
+        """Fetch tasks from backend in background thread."""
+        if self._tasks_loading:
+            return
+        self._tasks_loading = True
+
+        def _run():
+            try:
+                url = f"{Config.API_BASE_URL}/api/v1/tasks/my"
+                headers = {"Authorization": f"Bearer {self.access_token}",
+                           "Content-Type": "application/json"}
+                with httpx.Client(timeout=10.0) as client:
+                    r = client.get(url, headers=headers)
+                if r.status_code == 200:
+                    tasks = r.json().get("tasks", [])
+                    self.after(0, lambda t=tasks: self._on_tasks_loaded(t))
+                else:
+                    print(f"Tasks fetch error: {r.status_code}")
+                    self.after(0, lambda: self._on_tasks_loaded([]))
+            except Exception as e:
+                print(f"Tasks fetch error: {e}")
+                self.after(0, lambda: self._on_tasks_loaded([]))
+            finally:
+                self._tasks_loading = False
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _on_tasks_loaded(self, tasks: list):
+        self._tasks_data = tasks
+        self._render_tasks()
+
+    def _task_action(self, task_id: str, status: str, note: str = ""):
+        """PATCH task status in background."""
+        def _run():
+            try:
+                url = f"{Config.API_BASE_URL}/api/v1/tasks/{task_id}/status"
+                headers = {"Authorization": f"Bearer {self.access_token}",
+                           "Content-Type": "application/json"}
+                body = {"status": status}
+                if note:
+                    body["completion_note"] = note
+                with httpx.Client(timeout=10.0) as client:
+                    r = client.patch(url, headers=headers, json=body)
+                if r.status_code == 200:
+                    updated = r.json().get("task", {})
+                    self.after(0, lambda: self._update_single_task(updated))
+                    if status == "completed":
+                        self.after(0, lambda: self.show_banner(
+                            "Task marked complete! 🎉", severity="ok", duration_ms=4000))
+                    else:
+                        self.after(0, lambda: self.show_banner(
+                            "Task started", severity="info", duration_ms=3000))
+                else:
+                    print(f"Task update error: {r.status_code}")
+                    self.after(0, lambda: self.show_banner(
+                        "Failed to update task", severity="crit", duration_ms=4000))
+            except Exception as e:
+                print(f"Task update error: {e}")
+                self.after(0, lambda: self.show_banner(
+                    "Failed to update task", severity="crit", duration_ms=4000))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _update_single_task(self, updated: dict):
+        """Update a single task in self._tasks_data and re-render."""
+        for i, t in enumerate(self._tasks_data):
+            if t.get("id") == updated.get("id"):
+                self._tasks_data[i] = updated
+                break
+        self._render_tasks()
+
+    def _task_complete_dialog(self, task_id: str, title: str):
+        """Show completion-note dialog before marking done."""
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("Mark as Complete")
+        dlg.geometry("400x240")
+        dlg.resizable(False, False)
+        dlg.configure(fg_color=BG1)
+        dlg.transient(self)
+        dlg.grab_set()
+        ico = _asset("sentinel.ico")
+        if ico.exists():
+            try:
+                dlg.iconbitmap(str(ico))
+            except Exception:
+                pass
+        dlg.update_idletasks()
+        dlg.geometry(
+            f"400x240"
+            f"+{(dlg.winfo_screenwidth()-400)//2}"
+            f"+{(dlg.winfo_screenheight()-240)//2}")
+
+        ctk.CTkLabel(dlg, text="Mark as Complete",
+                     font=("Arial", 15, "bold"), text_color=GREEN
+                     ).pack(pady=(18, 4))
+        ctk.CTkLabel(dlg, text=title[:60],
+                     font=("Arial", 11), text_color=T2
+                     ).pack(pady=(0, 12))
+
+        note_entry = ctk.CTkTextbox(
+            dlg, height=60, fg_color=BG2, border_color=BORD,
+            border_width=1, corner_radius=8, text_color=T1,
+            font=("Arial", 11))
+        note_entry.pack(fill="x", padx=24, pady=(0, 14))
+        note_entry.insert("1.0", "")
+
+        btn_f = ctk.CTkFrame(dlg, fg_color="transparent")
+        btn_f.pack(fill="x", padx=24, pady=(0, 18))
+        btn_f.grid_columnconfigure((0, 1), weight=1)
+
+        ctk.CTkButton(
+            btn_f, text="Cancel", height=36, corner_radius=8,
+            fg_color="transparent", hover_color=BG3,
+            text_color=T3, border_color=BORD, border_width=1,
+            font=("Arial", 11), command=dlg.destroy
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+
+        def _confirm():
+            note = note_entry.get("1.0", "end").strip()
+            dlg.destroy()
+            self._task_action(task_id, "completed", note)
+
+        ctk.CTkButton(
+            btn_f, text="✓ Confirm Done", height=36, corner_radius=8,
+            fg_color=G_BG, hover_color="#0F2A1A",
+            text_color=GREEN, border_color=G_BD, border_width=1,
+            font=("Arial", 11, "bold"), command=_confirm
+        ).grid(row=0, column=1, sticky="ew", padx=(6, 0))
+
+    def refresh_tasks(self):
+        """Public API — called by SentinelApp when a task_assigned WS event arrives."""
+        self._fetch_tasks()
 
     # ── Left panel ───────────────────────────────────────────
     def _build_left(self, parent):

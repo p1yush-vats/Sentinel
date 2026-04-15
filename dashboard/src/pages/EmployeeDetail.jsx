@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { employeesAPI, sessionsAPI, flagsAPI, appealsAPI } from '../services/api'
+import { employeesAPI, sessionsAPI, flagsAPI, appealsAPI, reportsAPI } from '../services/api'
 import {
   fmt, fmtDate, fmtMins, fromNow,
   deptColor, initials, statusBadge, severityBadge
@@ -14,7 +14,7 @@ import {
   ArrowLeft, Clock, AlertTriangle, MessageSquare,
   Shield, Mail, Phone, Building2, BadgeCheck,
   UserX, UserCheck, ChevronDown, ChevronUp,
-  Activity, Zap, Award
+  Activity, Zap, Award, Download
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import SpotlightCard from '../components/ui/SpotlightCard'
@@ -173,13 +173,13 @@ export default function EmployeeDetail() {
     Promise.all([
       employeesAPI.getOne(id),
       sessionsAPI.getAll({ limit: 200, employee_id: id }),
-      flagsAPI.getUnreviewed({ limit: 200 }),
+      flagsAPI.getUnreviewed({ limit: 200, employee_id: id }),
       appealsAPI.getAll({ limit: 200 }),
     ])
       .then(([empRes, sessRes, flagsRes, appealsRes]) => {
         setEmployee(empRes.data)
         setSessions(sessRes.data?.sessions || [])
-        setFlags((flagsRes.data?.abnormalities || []).filter(f => f.employee_id === id))
+        setFlags(flagsRes.data?.abnormalities || [])
         setAppeals((appealsRes.data?.appeals || []).filter(a => a.employee_id === id))
       })
       .catch(() => toast.error('Failed to load employee'))
@@ -195,6 +195,23 @@ export default function EmployeeDetail() {
       toast.success(`${employee.full_name} ${employee.is_active ? 'deactivated' : 'activated'}`)
     } catch { toast.error('Failed to update') }
     finally { setToggling(false) }
+  }
+
+  const handleDownloadDossier = async () => {
+    try {
+      const toastId = toast.loading('Generating PDF dossier...', { id: 'dossier' })
+      const res = await reportsAPI.downloadDossier(id)
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `dossier_${employee.full_name.replace(' ', '_')}.pdf`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      toast.success('Dossier downloaded', { id: 'dossier' })
+    } catch {
+      toast.error('Failed to generate dossier', { id: 'dossier' })
+    }
   }
 
   // ── Computed ──────────────────────────────────────────────
@@ -322,6 +339,11 @@ export default function EmployeeDetail() {
                     <MessageSquare size={12} />
                     Alert
                   </button>
+                  <button onClick={handleDownloadDossier}
+                    className="flex items-center gap-1.5 text-xs font-mono px-3 py-1.5 rounded-lg border border-purple-500/20 text-purple-400 hover:bg-purple-400/10 transition-all">
+                    <Download size={12} />
+                    Dossier
+                  </button>
                 </div>
               </div>
               <div className="flex flex-wrap gap-x-5 gap-y-1.5">
@@ -414,10 +436,11 @@ export default function EmployeeDetail() {
                       </linearGradient>
                     </defs>
                     <XAxis dataKey="label" tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'IBM Plex Mono' }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'IBM Plex Mono' }} axisLine={false} tickLine={false} />
+                    <YAxis yAxisId="left" tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'IBM Plex Mono' }} axisLine={false} tickLine={false} />
+                    <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fill: '#ef4444', fontSize: 10, fontFamily: 'IBM Plex Mono' }} axisLine={false} tickLine={false} tickFormatter={v => `${v}%`} />
                     <Tooltip content={<ChartTooltip />} />
-                    <Area type="monotone" dataKey="work" name="Work (min)" stroke="#22d3ee" strokeWidth={2} fill="url(#wg)" dot={{ fill: '#22d3ee', r: 3 }} activeDot={{ r: 5 }} />
-                    <Area type="monotone" dataKey="risk" name="Risk Score"  stroke="#ef4444" strokeWidth={1.5} fill="url(#rg)" strokeDasharray="4 3" dot={false} />
+                    <Area yAxisId="left" type="monotone" dataKey="work" name="Work (min)" stroke="#22d3ee" strokeWidth={2} fill="url(#wg)" dot={{ fill: '#22d3ee', r: 3 }} activeDot={{ r: 5 }} />
+                    <Area yAxisId="right" type="monotone" dataKey="risk" name="Risk Score"  stroke="#ef4444" strokeWidth={1.5} fill="url(#rg)" strokeDasharray="4 3" dot={{ fill: '#ef4444', r: 2 }} activeDot={{ r: 4 }} />
                   </AreaChart>
                 </ResponsiveContainer>
               )}

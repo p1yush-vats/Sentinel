@@ -42,10 +42,6 @@ function NoteModal({ task, onClose, onConfirm }) {
 }
 
 export default function MyTasks() {
-  const { theme: t } = (() => {
-    try { return require('./ThemeContext').useTheme() } catch { return { theme: null } }
-  })()
-
   const [tasks, setTasks]         = useState([])
   const [loading, setLoading]     = useState(true)
   const [filter, setFilter]       = useState('all')   // all | pending | in_progress | completed

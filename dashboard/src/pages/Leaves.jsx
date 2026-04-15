@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Calendar, CheckCircle, XCircle, Clock, ExternalLink } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import { employeesAPI } from '../services/api'
-import { initials, deptColor } from '../utils/helpers'
+import { initials, deptColor, fromNow } from '../utils/helpers'
 
 const STATUS_STYLE = {
   pending:  { badge: 'badge-medium',   icon: Clock,       color: 'text-amber-400'   },
@@ -76,7 +76,15 @@ export default function Leaves() {
 
   useEffect(() => { load() }, [])
 
-  const filtered = filter === 'all' ? leaves : leaves.filter(l => l.status === filter)
+  const filtered = useMemo(() => {
+    let result = filter === 'all' ? leaves : leaves.filter(l => l.status === filter)
+    // Sort pending first, then everything else (assuming mostly date-ordered from API)
+    return result.sort((a, b) => {
+      if (a.status === 'pending' && b.status !== 'pending') return -1
+      if (b.status === 'pending' && a.status !== 'pending') return 1
+      return 0
+    })
+  }, [leaves, filter])
 
   const stats = {
     pending:  leaves.filter(l => l.status === 'pending').length,
@@ -226,7 +234,7 @@ export default function Leaves() {
 
                       {/* Leave type + status */}
                       <div className="flex items-center gap-2 flex-wrap shrink-0">
-                        <span className={`${TYPE_COLORS[leave.leave_type] || 'text-cyan-400'} text-xs font-mono font-bold`}>
+                        <span className={`${TYPE_COLORS[leave.leave_type] || 'text-cyan-400'} text-[11px] uppercase tracking-wider font-mono font-bold`}>
                           {TYPE_NAMES[leave.leave_type] || leave.leave_type}
                         </span>
                         <span className={st.badge}>{leave.status}</span>
@@ -234,19 +242,27 @@ export default function Leaves() {
                     </div>
 
                     {/* Dates + days */}
-                    <div className="flex items-center gap-4 mb-2 flex-wrap">
-                      <span className="text-xs font-mono text-sentinel-text font-semibold">
+                    <div className="flex items-center gap-4 flex-wrap mt-2">
+                      <span className="text-sm font-mono text-sentinel-text font-semibold flex items-center gap-1.5">
+                        <Calendar size={13} className="text-sentinel-muted" />
                         {leave.from_date} → {leave.to_date}
                       </span>
-                      <span className="text-xs font-mono text-sentinel-muted">
+                      <span className="text-xs font-mono text-sentinel-muted bg-navy-800 px-2 py-0.5 rounded border border-sentinel-border">
                         {leave.days_requested} working day{leave.days_requested !== 1 ? 's' : ''}
                       </span>
+                      {leave.created_at && (
+                        <span className="text-[10px] font-mono text-sentinel-muted ml-auto">
+                          Applied {fromNow(leave.created_at)}
+                        </span>
+                      )}
                     </div>
-
+                    
                     {/* Reason */}
-                    <p className="text-xs text-sentinel-muted italic mb-2">
-                      "{leave.reason}"
-                    </p>
+                    <div className="mt-3 bg-navy-900/50 rounded-lg p-3 border border-sentinel-border/50">
+                      <p className="text-xs text-sentinel-muted italic">
+                        "{leave.reason}"
+                      </p>
+                    </div>
 
                     {/* Admin response if already reviewed */}
                     {leave.admin_response && leave.status !== 'pending' && (

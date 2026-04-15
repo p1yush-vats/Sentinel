@@ -74,6 +74,30 @@ async def root():
     }
 
 
+@app.websocket("/ws/admin-feed")
+async def admin_feed_endpoint(websocket: WebSocket):
+    """
+    Dedicated WebSocket endpoint for the admin dashboard Live Feed.
+    Must be declared BEFORE /ws/{user_id} so FastAPI matches the literal
+    path instead of capturing 'admin-feed' as a user_id parameter.
+
+    Connects under the reserved key 'admin-feed' so manager.broadcast()
+    fans all real-time events (sessions, abnormalities, tasks) to every
+    connected admin dashboard tab automatically.
+    """
+    ADMIN_FEED_KEY = "admin-feed"
+    await manager.connect(websocket, ADMIN_FEED_KEY)
+    try:
+        while True:
+            # Keep connection alive; dashboard only listens, never sends
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, ADMIN_FEED_KEY)
+    except Exception as e:
+        logger.error(f"Admin feed WebSocket error: {e}")
+        manager.disconnect(websocket, ADMIN_FEED_KEY)
+
+
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
     await manager.connect(websocket, user_id)

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
@@ -11,7 +11,9 @@ from ..core.database import get_db
 from ..core.security import get_current_user_id, RoleChecker
 from ..core.websocket import manager
 from ..models.task import Task
+from ..models.employee import Employee
 from .audit_log import write_audit
+from ..tasks.email_tasks import send_task_assignment
 
 router = APIRouter()
 
@@ -40,6 +42,7 @@ class TaskStatusUpdate(BaseModel):
 @router.post("/", dependencies=[Depends(RoleChecker(["admin"]))])
 async def create_task(
     data:     TaskCreate,
+    background_tasks: BackgroundTasks,
     admin_id: str = Depends(get_current_user_id),
     db:       AsyncSession = Depends(get_db),
 ):
@@ -71,6 +74,10 @@ async def create_task(
     )
     # Broadcast to admin feed
     await manager.broadcast({"type": "task_assigned", "data": payload})
+
+    employee = await db.scalar(select(Employee).where(Employee.id == uuid.UUID(data.assigned_to)))
+    if employee:
+        background_tasks.add_task(send_task_assignment, employee.email, employee.full_name, task.title, task.priority)
 
     return {"message": "Task created", "task": payload}
 
