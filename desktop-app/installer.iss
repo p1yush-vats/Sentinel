@@ -31,79 +31,61 @@ WizardStyle=modern
 PrivilegesRequired=admin
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ArchitecturesInstallIn64BitMode=x64compatible
-; Disable antivirus warning prompt
 DisableWelcomePage=no
 DisableDirPage=no
-; Show "Run as Administrator" prompt if needed (pynput needs it)
-; Users can also right-click → Run as administrator manually
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon";    Description: "Create a &desktop shortcut";     GroupDescription: "Additional icons:"
-Name: "startmenuicon";  Description: "Create a &Start Menu shortcut";  GroupDescription: "Additional icons:"
-Name: "startupicon";    Description: "Start SENTINEL with &Windows";   GroupDescription: "Startup:"; Flags: unchecked
+Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"
+Name: "startmenuicon"; Description: "Create a &Start Menu shortcut"; GroupDescription: "Additional icons:"
+Name: "startupicon"; Description: "Start SENTINEL with &Windows"; GroupDescription: "Startup:"; Flags: unchecked
 
 [Files]
-; The single-file exe (PyInstaller output)
 Source: "dist\SENTINEL.exe"; DestDir: "{app}"; Flags: ignoreversion
-
-; .env config (users can edit this after install)
-; If .env doesn't exist yet, create a default one via [INI] section below
 Source: "dist\.env"; DestDir: "{app}"; Flags: ignoreversion; Check: FileExists('dist\.env')
 
 [Icons]
-; Desktop shortcut
-Name: "{autodesktop}\{#MyAppName}";
-  Filename: "{app}\{#MyAppExeName}";
-  IconFilename: "{app}\{#MyAppExeName}";
-  Tasks: desktopicon
-
-; Start Menu shortcut
-Name: "{group}\{#MyAppName}";
-  Filename: "{app}\{#MyAppExeName}";
-  IconFilename: "{app}\{#MyAppExeName}";
-  Tasks: startmenuicon
-
-; Startup shortcut
-Name: "{userstartup}\{#MyAppName}";
-  Filename: "{app}\{#MyAppExeName}";
-  Tasks: startupicon
-
-; Uninstaller in Start Menu
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: startmenuicon
+Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: startupicon
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
-[INI]
-; Create a default .env if one wasn't bundled
-; Edit API_BASE_URL to point at your production server
-Filename: "{app}\.env"; Section: ""; Key: "API_BASE_URL";              String: "https://sentinel-ny7w.onrender.com"; Flags: createkeyifdoesntexist
-Filename: "{app}\.env"; Section: ""; Key: "PORTAL_URL";                String: "https://sentinel-self.vercel.app/";  Flags: createkeyifdoesntexist
-Filename: "{app}\.env"; Section: ""; Key: "WORK_MINUTES_PER_HOUR";     String: "50";    Flags: createkeyifdoesntexist
-Filename: "{app}\.env"; Section: ""; Key: "BREAK_MINUTES_PER_HOUR";    String: "10";    Flags: createkeyifdoesntexist
-Filename: "{app}\.env"; Section: ""; Key: "LUNCH_DURATION_MINUTES";    String: "30";    Flags: createkeyifdoesntexist
-Filename: "{app}\.env"; Section: ""; Key: "DAILY_WORK_TARGET_MINUTES"; String: "400";   Flags: createkeyifdoesntexist
-Filename: "{app}\.env"; Section: ""; Key: "SYNC_INTERVAL_SECONDS";     String: "60";    Flags: createkeyifdoesntexist
-Filename: "{app}\.env"; Section: ""; Key: "THEME";                     String: "dark";  Flags: createkeyifdoesntexist
-Filename: "{app}\.env"; Section: ""; Key: "LOG_LEVEL";                 String: "INFO";  Flags: createkeyifdoesntexist
-
 [Run]
-; Offer to launch after install
-Filename: "{app}\{#MyAppExeName}";
-  Description: "Launch SENTINEL now";
-  Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch SENTINEL now"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; Remove the .env on uninstall (contains API keys — clean up properly)
 Type: files; Name: "{app}\.env"
-; Optional: remove local database on uninstall (comment out to keep user data)
-; Type: filesandordirs; Name: "{userappdata}\.sentinel"
 
 [Code]
-// Check if .NET or VC++ redistributable is needed (pynput hooks need MSVC runtime)
-// This is usually already present on Windows 10/11 but check anyway.
+procedure CreateDefaultEnv(EnvPath: String);
+var
+  Lines: TArrayOfString;
+begin
+  if FileExists(EnvPath) then Exit;
+
+  SetArrayLength(Lines, 9);
+  Lines[0] := 'API_BASE_URL=https://sentinel-ny7w.onrender.com';
+  Lines[1] := 'PORTAL_URL=https://sentinel-self.vercel.app/';
+  Lines[2] := 'WORK_MINUTES_PER_HOUR=50';
+  Lines[3] := 'BREAK_MINUTES_PER_HOUR=10';
+  Lines[4] := 'LUNCH_DURATION_MINUTES=30';
+  Lines[5] := 'DAILY_WORK_TARGET_MINUTES=400';
+  Lines[6] := 'SYNC_INTERVAL_SECONDS=60';
+  Lines[7] := 'THEME=dark';
+  Lines[8] := 'LOG_LEVEL=INFO';
+
+  SaveStringsToFile(EnvPath, Lines, False);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    CreateDefaultEnv(ExpandConstant('{app}\.env'));
+end;
+
 function InitializeSetup(): Boolean;
 begin
   Result := True;
-  // You could add version checks here if needed
 end;
