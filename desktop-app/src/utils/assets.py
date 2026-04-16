@@ -12,11 +12,16 @@ Usage:
 """
 from pathlib import Path
 from typing import Optional
-import customtkinter as ctk
-from PIL import Image
+import sys
 
 # ── Asset root: desktop-app/assets/iso/ ──────────────────────
-_ASSET_DIR = Path(__file__).parent.parent.parent / "assets" / "iso"
+if getattr(sys, 'frozen', False):
+    # Running in a bundle (Nuitka/PyInstaller)
+    _BASE_DIR = Path(sys.executable).parent
+    _ASSET_DIR = _BASE_DIR / "assets" / "iso"
+else:
+    # Running in normal Python
+    _ASSET_DIR = Path(__file__).parent.parent.parent / "assets" / "iso"
 
 ICO_PATH          = _ASSET_DIR / "sentinel.ico"
 SHIELD_PNG_256    = _ASSET_DIR / "sentinel_shield.png"
