@@ -830,7 +830,7 @@ class SentinelApp:
         dlg.configure(fg_color=BG1)
         dlg.transient(self.main_window)
         dlg.grab_set()
-        _set_icon(dlg)
+        set_window_icon(dlg)
         dlg.update_idletasks()
         dlg.geometry(f"500x290+{(dlg.winfo_screenwidth()-500)//2}+{(dlg.winfo_screenheight()-290)//2}")
 
