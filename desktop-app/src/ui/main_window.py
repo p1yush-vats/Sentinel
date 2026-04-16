@@ -301,12 +301,8 @@ class MainWindow(ctk.CTk):
         self.minsize(940, 640)
         self.configure(fg_color=BG0)
 
-        ico = _asset("sentinel.ico")
-        if ico.exists():
-            try:
-                self.iconbitmap(str(ico))
-            except Exception:
-                pass
+        from utils.assets import set_window_icon
+        set_window_icon(self)
 
         self.update_idletasks()
         w, h = 1140, 720
@@ -345,12 +341,22 @@ class MainWindow(ctk.CTk):
         brand.grid_propagate(False)
         inner = ctk.CTkFrame(brand, fg_color="transparent")
         inner.place(x=18, rely=0.5, anchor="w")
-        sh = ctk.CTkFrame(inner, width=32, height=32,
-                           fg_color="#1E3A6E", corner_radius=8)
-        sh.pack(side="left", padx=(0, 10))
-        sh.pack_propagate(False)
-        ctk.CTkLabel(sh, text="S", font=("Arial", 14, "bold"),
-                     text_color=BLUE).place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Load Skull Logo
+        from utils.assets import get_logo_32
+        logo_img = get_logo_32()
+        
+        if logo_img:
+            sh = ctk.CTkLabel(inner, image=logo_img, text="")
+            sh.pack(side="left", padx=(0, 10))
+        else:
+            sh = ctk.CTkFrame(inner, width=32, height=32,
+                               fg_color="#1E3A6E", corner_radius=8)
+            sh.pack(side="left", padx=(0, 10))
+            sh.pack_propagate(False)
+            ctk.CTkLabel(sh, text="S", font=("Arial", 14, "bold"),
+                         text_color=BLUE).place(relx=0.5, rely=0.5, anchor="center")
+                         
         ctk.CTkLabel(inner, text="SENTINEL",
                      font=("Arial", 15, "bold"), text_color=T1).pack(side="left")
 
