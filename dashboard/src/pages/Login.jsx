@@ -4,6 +4,7 @@ import { useAuthStore } from '../store/authStore'
 import { Eye, EyeOff, AlertCircle, Mail, Lock, Download, Monitor } from 'lucide-react'
 import LightPillar from '../components/ui/LightPillar'
 
+const DOWNLOAD_URL = "https://github.com/p1yush-vats/Sentinel/releases/latest/download/SENTINEL-Setup.exe"
 /* ── Smooth animated gradient palette ── */
 const COLOR_PALETTE = [
   { top: '#22d3ee', bottom: '#0a1628' },
@@ -116,7 +117,7 @@ export default function Login() {
           {/* Desktop Download Client Button */}
           <div className="mt-12 animate-fade-in stagger-2">
             <a 
-              href="https://drive.google.com/uc?export=download&id=126eoXs039V7n0jp3cKQEmlzosc38RuE-"
+              href={DOWNLOAD_URL}           
               target="_blank" 
               rel="noopener noreferrer"
               download
@@ -290,8 +291,7 @@ export default function Login() {
             
             {/* Secondary Download Link (Mobile focus) */}
             <a 
-              href="https://drive.google.com/uc?export=download&id=1UlCMSVUt1VGfu-B9AH-DVlO4C35XC9QC"
-              target="_blank"
+              href={DOWNLOAD_URL}
               rel="noopener noreferrer"
               download
               className="lg:hidden flex items-center gap-2 text-[10px] font-mono font-bold tracking-widest text-sentinel-muted hover:text-cyan-400 transition-colors uppercase"
