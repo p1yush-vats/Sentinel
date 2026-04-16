@@ -292,11 +292,18 @@ export default function Login() {
             {/* Secondary Download Link (Mobile focus) */}
             <a 
               href={DOWNLOAD_URL}
+              target="_blank"
               rel="noopener noreferrer"
-              download
-              className="lg:hidden flex items-center gap-2 text-[10px] font-mono font-bold tracking-widest text-sentinel-muted hover:text-cyan-400 transition-colors uppercase"
+              className="lg:hidden w-full flex items-center justify-center gap-3 mt-2 px-5 py-4 rounded-xl font-bold text-sm tracking-wide transition-all duration-300 shadow-lg"
+              style={{
+                background: topColor,
+                color: '#020818',
+                boxShadow: `0 0 25px ${topColor}88`,
+              }}
             >
-              <Monitor size={12} /> Get Desktop App <Download size={10} />
+              <Monitor size={18} />
+              Download Desktop App
+              <Download size={16} />
             </a>
           </div>
         </div>
