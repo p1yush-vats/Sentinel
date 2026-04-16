@@ -106,7 +106,7 @@ class SentinelApp:
         self._logout_pending: bool = False
         
         self.tray_icon = None
-        self._setup_tray()
+        # Tray is set up after the first window is visible (see run())
 
     def _setup_tray(self):
         if not ICO_PATH.exists():
@@ -140,11 +140,11 @@ class SentinelApp:
         elif self.login_window:
             self.login_window.after(0, _show)
 
-    def _on_tray_exit(self, icon, item):
+    def _on_tray_exit(self, icon=None, item=None):
         import os
         print("Tray exit: terminating Sentinel...")
-        if self.tray_icon:
-            self.tray_icon.stop()
+        # Don't call self.tray_icon.stop() — it blocks inside the tray thread
+        # causing a deadlock before os._exit() can fire.
         os._exit(0)
 
     # ─────────────────────────────────────────────────────────
@@ -162,6 +162,7 @@ class SentinelApp:
                 try:
                     print(f"Auto-login: {self.user.get('full_name')} ({self.user.get('role')})")
                     self._init_components()
+                    self._setup_tray()
                     incomplete = self._check_incomplete_session()
                     if incomplete:
                         self._session_recovery_dialog(incomplete)
@@ -175,6 +176,7 @@ class SentinelApp:
             else:
                 self.jwt_handler.clear_tokens()
 
+        self._setup_tray()
         self._show_login()
 
     # ─────────────────────────────────────────────────────────
