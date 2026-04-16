@@ -6,8 +6,16 @@ from pathlib import Path
 from dotenv import load_dotenv
 from datetime import timezone, timedelta
 
-# Load environment variables from the .env next to this package
-_env_path = Path(__file__).parent.parent.parent / ".env"
+# Robust .env detection
+import sys
+if getattr(sys, 'frozen', False) or "__compiled__" in globals():
+    # In Nuitka standalone, the .env is in the folder next to the .exe.
+    _BASE_DIR = Path(sys.executable).parent
+else:
+    # In source, it's 3 levels up from this file
+    _BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+_env_path = _BASE_DIR / ".env"
 load_dotenv(dotenv_path=_env_path)
 
 # IST Timezone

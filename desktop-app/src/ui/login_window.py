@@ -11,27 +11,7 @@ IMAGE SAFETY NOTE:
 """
 import customtkinter as ctk
 from PIL import Image
-from pathlib import Path
-from typing import Optional, Callable
-import threading
-import httpx
-
-
-def _asset(filename: str) -> Path:
-    return Path(__file__).parent.parent.parent / "assets" / "iso" / filename
-
-
-def _try_load_image(filename: str, size: tuple) -> Optional[ctk.CTkImage]:
-    """Load image safely — returns None if file missing or load fails."""
-    path = _asset(filename)
-    if not path.exists():
-        return None
-    try:
-        pil = Image.open(path).convert("RGBA")
-        return ctk.CTkImage(light_image=pil, dark_image=pil, size=size)
-    except Exception as e:
-        print(f"[login] Image load failed ({filename}): {e}")
-        return None
+from utils.assets import get_logo_64, set_window_icon
 
 
 # Palette
@@ -65,12 +45,7 @@ class LoginWindow(ctk.CTk):
         self.resizable(False, False)
         self.configure(fg_color=BG0)
 
-        ico = _asset("sentinel.ico")
-        if ico.exists():
-            try:
-                self.iconbitmap(str(ico))
-            except Exception:
-                pass
+        set_window_icon(self)
 
         self._center()
         self._build()   # image loaded here, safely inside active root
@@ -83,8 +58,8 @@ class LoginWindow(ctk.CTk):
         self.geometry(f"{w}x{h}+{x}+{y}")
 
     def _build(self):
-        # Load fresh image bound to THIS CTk instance
-        self._shield_img = _try_load_image("sentinel_shield.png", (64, 64))
+        # Load Skull Logo safely
+        self._shield_img = get_logo_64()
 
         outer = ctk.CTkFrame(self, fg_color="transparent")
         outer.pack(fill="both", expand=True, padx=32, pady=32)

@@ -14,7 +14,7 @@ Write-Host "This will take 10-20 minutes." -ForegroundColor Yellow
 Write-Host ""
 
 & $VENV_PYTHON -m nuitka `
-    --onefile `
+    --standalone `
     --windows-console-mode=disable `
     --windows-icon-from-ico="..\assets\iso\sentinel.ico" `
     --assume-yes-for-downloads `

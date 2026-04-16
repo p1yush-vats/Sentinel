@@ -13,17 +13,27 @@ Usage:
 from pathlib import Path
 from typing import Optional
 import sys
+import customtkinter as ctk
+from PIL import Image
 
-# ── Asset root: desktop-app/assets/iso/ ──────────────────────
-if getattr(sys, 'frozen', False):
-    # Running in a bundle (Nuitka/PyInstaller)
-    _BASE_DIR = Path(sys.executable).parent
-    _ASSET_DIR = _BASE_DIR / "assets" / "iso"
-else:
-    # Running in normal Python
-    _ASSET_DIR = Path(__file__).parent.parent.parent / "assets" / "iso"
+# ── Asset root detection ──────────────────────────────────
+import sys
+import os
+
+def get_app_root():
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).parent
+    if "__compiled__" in globals():
+        return Path(sys.executable).parent
+    return Path(__file__).resolve().parent.parent.parent
+
+_BASE_DIR = get_app_root()
+_env_path = _BASE_DIR / ".env"
+load_dotenv(dotenv_path=_env_path)
+_ASSET_DIR = _BASE_DIR / "assets" / "iso"
 
 ICO_PATH          = _ASSET_DIR / "sentinel.ico"
+SENTINEL_LOGO     = _ASSET_DIR / "sentinel_logo_nobg.png"
 SHIELD_PNG_256    = _ASSET_DIR / "sentinel_shield.png"
 SHIELD_PNG_32     = _ASSET_DIR / "sentinel_32.png"
 SHIELD_PNG_64     = _ASSET_DIR / "sentinel_64.png"
@@ -59,6 +69,12 @@ def _get(key: str, path: Path, size: tuple) -> Optional[ctk.CTkImage]:
     if key not in _cache:
         _cache[key] = _ctk_image(path, size)
     return _cache[key]
+
+def get_logo_64() -> Optional[ctk.CTkImage]:
+    return _get("logo64", SENTINEL_LOGO, (64, 64))
+
+def get_logo_32() -> Optional[ctk.CTkImage]:
+    return _get("logo32", SENTINEL_LOGO, (32, 32))
 
 def get_shield_32()  -> Optional[ctk.CTkImage]:
     return _get("s32",  SHIELD_PNG_32,  (32, 32))
