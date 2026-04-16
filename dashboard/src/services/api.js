@@ -1,7 +1,7 @@
 import axios from 'axios'
 
 const api = axios.create({ 
-  baseURL: import.meta.env.VITE_API_URL || '/api/v1', 
+  baseURL: import.meta.env.VITE_API_URL || 'https://sentinel-ny7w.onrender.com/api/v1', 
   timeout: 15000 
 })
 api.interceptors.response.use(
