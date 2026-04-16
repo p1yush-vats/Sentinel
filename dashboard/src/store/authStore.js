@@ -23,7 +23,7 @@ async function _tryDesktopTokenHandoff() {
     if (!raw) return null
 
     // Wipe token from URL immediately — don't leave it in history
-    const clean = window.location.pathname + window.location.search.replace(/[?&]token=[^&]+/, '').replace(/^&/, '?')
+    const clean = window.location.origin + window.location.pathname;
     window.history.replaceState(null, '', clean)
 
     // Validate & fetch user profile with this token

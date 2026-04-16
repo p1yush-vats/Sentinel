@@ -9,6 +9,9 @@ IMAGE SAFETY NOTE:
   its own fresh image inside _build(), after super().__init__() has
   made this CTk the active root.
 """
+import threading
+import httpx
+from typing import Optional, Callable
 import customtkinter as ctk
 from PIL import Image
 from utils.assets import get_logo_64, set_window_icon
