@@ -15,6 +15,7 @@ from typing import Optional
 import sys
 import customtkinter as ctk
 from PIL import Image
+from dotenv import load_dotenv
 
 # ── Asset root detection ──────────────────────────────────
 import sys
@@ -64,6 +65,11 @@ def set_window_icon(window) -> None:
 # Call get_shield_XX() to access; avoids Tk being initialised at module level.
 
 _cache: dict = {}
+
+def clear_cache():
+    """Clear the image cache. Call this when switching between Tk roots."""
+    _cache.clear()
+    print("[assets] Image cache cleared")
 
 def _get(key: str, path: Path, size: tuple) -> Optional[ctk.CTkImage]:
     if key not in _cache:

@@ -131,15 +131,11 @@ class SentinelApp:
             self.login_window.after(0, self.login_window.lift)
 
     def _on_tray_exit(self, icon, item):
-        import sys
+        import os
+        print("Tray exit: terminating Sentinel...")
         if self.tray_icon:
             self.tray_icon.stop()
-        if self.main_window:
-            self.main_window.after(0, self.main_window.quit)
-        elif self.login_window:
-            self.login_window.after(0, self.login_window.destroy)
-        else:
-            sys.exit(0)
+        os._exit(0)
 
     # ─────────────────────────────────────────────────────────
     def run(self):
@@ -276,18 +272,23 @@ class SentinelApp:
             pass
         self.login_window = None
 
-    def _on_login_success(self, user: dict, access_token: str):
-        self.user         = user
+    def _on_login_success(self, user, access_token):
+        self.user = user
         self.access_token = access_token
-        self.jwt_handler.save_tokens(access_token=access_token, refresh_token="", user_data=user)
-        print(f"Login OK: {user.get('full_name')} ({user.get('role')})")
-        self._init_components()
-        # Withdraw login window before opening main — prevents image binding issues
+        self.jwt_handler.save_tokens(
+            access_token=access_token,
+            refresh_token=access_token, # backend uses same for now
+            user_data=user
+        )
         if self.login_window:
-            try:
-                self.login_window.withdraw()
-            except Exception:
-                pass
+            self.login_window.destroy()
+            self.login_window = None
+
+        # Resolve pyimage conflict by clearing cache before creating MainWindow root
+        from utils import assets
+        assets.clear_cache()
+
+        self._init_components()
         self._show_main()
 
     def _logout(self):
