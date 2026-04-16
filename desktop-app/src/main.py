@@ -34,6 +34,7 @@ from sync.sync_client             import SyncClient
 from detection.input_collector    import InputCollector
 from detection.abnormality_detector   import AbnormalityDetector, Abnormality
 from detection.abnormality_aggregator import AbnormalityAggregator
+from utils.assets import ICO_PATH, set_window_icon
 import customtkinter as ctk
 
 IST = pytz.timezone("Asia/Kolkata")
@@ -48,17 +49,8 @@ A_BG = "#1A1400";  A_BD = "#3B2C00"
 R_BG = "#1A0D0D";  R_BD = "#3B1010"
 
 
-def _asset(filename: str) -> Path:
-    return Path(__file__).parent.parent / "assets" / "iso" / filename
-
-
-def _set_icon(window) -> None:
-    ico = _asset("sentinel.ico")
-    if ico.exists():
-        try:
-            window.iconbitmap(str(ico))
-        except Exception:
-            pass
+# Use the standardized helper from utils.assets
+# (helpers removed here to avoid duplication)
 
 
 def now_ist():
@@ -117,11 +109,10 @@ class SentinelApp:
         self._setup_tray()
 
     def _setup_tray(self):
-        ico_path = _asset("sentinel.ico")
-        if not ico_path.exists():
+        if not ICO_PATH.exists():
             return
         try:
-            image = Image.open(str(ico_path))
+            image = Image.open(str(ICO_PATH))
             menu = pystray.Menu(
                 pystray.MenuItem("Show Sentinel", self._on_tray_show, default=True),
                 pystray.MenuItem("Exit Sentinel", self._on_tray_exit)
@@ -208,7 +199,7 @@ class SentinelApp:
         dlg.resizable(False, False)
         dlg.configure(fg_color=BG1)
         dlg.attributes("-topmost", True)
-        _set_icon(dlg)
+        set_window_icon(dlg)
         dlg.update_idletasks()
         sw, sh = dlg.winfo_screenwidth(), dlg.winfo_screenheight()
         dlg.geometry(f"540x320+{(sw-540)//2}+{(sh-320)//2}")
