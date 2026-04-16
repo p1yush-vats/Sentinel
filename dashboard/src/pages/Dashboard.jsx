@@ -66,24 +66,7 @@ export default function Dashboard() {
       setSessionTrend(days)
 
       // ── High risk employees ─────────────────────────────
-      // Build risk score per employee from their sessions
-      const empRiskMap = {}
-      sess.forEach(s => {
-        if (!empRiskMap[s.employee_id]) {
-          empRiskMap[s.employee_id] = { maxRisk: 0, sessionCount: 0 }
-        }
-        empRiskMap[s.employee_id].maxRisk = Math.max(
-          empRiskMap[s.employee_id].maxRisk,
-          s.risk_score || 0
-        )
-        empRiskMap[s.employee_id].sessionCount++
-      })
-
       const risky = emps
-        .map(e => ({
-          ...e,
-          risk_score: empRiskMap[e.id]?.maxRisk || e.risk_score || 0
-        }))
         .filter(e => (e.risk_score || 0) > 0)
         .sort((a, b) => (b.risk_score || 0) - (a.risk_score || 0))
       setTopRisk(risky)

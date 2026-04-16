@@ -1,7 +1,7 @@
 # backend/app/models/leave.py
 import uuid
 from sqlalchemy import Column, String, Integer, Text, Date, DateTime, ForeignKey, Boolean
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 from ..core.database import Base
 
@@ -19,7 +19,9 @@ class Leave(Base):
     status         = Column(String(20), default='pending')  # pending, approved, rejected
     reviewed_by    = Column(UUID(as_uuid=True), ForeignKey('employees.id'), nullable=True)
     reviewed_at    = Column(DateTime(timezone=True), nullable=True)
-    admin_response = Column(Text, nullable=True)
+    admin_response     = Column(Text, nullable=True)
+    medical_certificate = Column(Text, nullable=True)
+    comments           = Column(JSONB, nullable=True, default=list)
     created_at     = Column(DateTime(timezone=True), server_default=func.now())
     updated_at     = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -35,6 +37,8 @@ class Leave(Base):
             "status":         self.status,
             "reviewed_by":    str(self.reviewed_by) if self.reviewed_by else None,
             "reviewed_at":    self.reviewed_at.isoformat() if self.reviewed_at else None,
-            "admin_response": self.admin_response,
+            "admin_response":      self.admin_response,
+            "medical_certificate": self.medical_certificate,
+            "comments":            self.comments or [],
             "created_at":     self.created_at.isoformat() if self.created_at else None,
         }

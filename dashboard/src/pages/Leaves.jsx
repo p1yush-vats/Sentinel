@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Calendar, CheckCircle, XCircle, Clock, ExternalLink } from 'lucide-react'
+import { Calendar, CheckCircle, XCircle, Clock, ExternalLink, MessageCircle, ScrollText } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import { employeesAPI } from '../services/api'
@@ -10,6 +10,7 @@ const STATUS_STYLE = {
   pending:  { badge: 'badge-medium',   icon: Clock,       color: 'text-amber-400'   },
   approved: { badge: 'badge-low',      icon: CheckCircle, color: 'text-emerald-400' },
   rejected: { badge: 'badge-critical', icon: XCircle,     color: 'text-red-400'     },
+  needs_info: { badge: 'badge-medium', icon: MessageCircle, color: 'text-blue-400' },
 }
 
 const TYPE_COLORS = {
@@ -57,9 +58,10 @@ export default function Leaves() {
   const [filter,    setFilter]    = useState('all')
   const [acting,    setActing]    = useState(null)
   const [response,  setResponse]  = useState({})
+  const [showCert,  setShowCert]  = useState({})   // id → bool
 
-  const load = () => {
-    setLoading(true)
+  const load = (silent = false) => {
+    if (!silent) setLoading(true)
     Promise.all([
       api.get('/leaves/all'),
       employeesAPI.getAll({ limit: 500 }),
@@ -70,18 +72,26 @@ export default function Leaves() {
         ;(eRes.data?.employees || []).forEach(e => { map[e.id] = e })
         setEmpMap(map)
       })
-      .catch(() => toast.error('Failed to load leave requests'))
-      .finally(() => setLoading(false))
+      .catch(() => {
+        if (!silent) toast.error('Failed to load leave requests')
+      })
+      .finally(() => {
+        if (!silent) setLoading(false)
+      })
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { 
+    load()
+    const interval = setInterval(() => load(true), 15000)
+    return () => clearInterval(interval)
+  }, [])
 
   const filtered = useMemo(() => {
     let result = filter === 'all' ? leaves : leaves.filter(l => l.status === filter)
     // Sort pending first, then everything else (assuming mostly date-ordered from API)
     return result.sort((a, b) => {
-      if (a.status === 'pending' && b.status !== 'pending') return -1
-      if (b.status === 'pending' && a.status !== 'pending') return 1
+      if ((a.status === 'pending' || a.status === 'needs_info') && (b.status !== 'pending' && b.status !== 'needs_info')) return -1
+      if ((b.status === 'pending' || b.status === 'needs_info') && (a.status !== 'pending' && a.status !== 'needs_info')) return 1
       return 0
     })
   }, [leaves, filter])
@@ -102,9 +112,15 @@ export default function Leaves() {
     try {
       await api.post(`/leaves/${id}/review`, { status, admin_response: adminResponse })
       toast.success(`Leave request ${status}`)
-      setLeaves(prev => prev.map(l =>
-        l.id === id ? { ...l, status, admin_response: adminResponse } : l
-      ))
+      setLeaves(prev => prev.map(l => {
+        if (l.id === id) {
+          const newComments = status === 'needs_info' && adminResponse
+            ? [...(l.comments || []), { sender: 'admin', message: adminResponse, timestamp: new Date().toISOString() }]
+            : (l.comments || [])
+          return { ...l, status, admin_response: status === 'needs_info' ? l.admin_response : adminResponse, comments: newComments }
+        }
+        return l
+      }))
       setResponse(prev => ({ ...prev, [id]: '' }))
     } catch (e) {
       toast.error(e.response?.data?.detail || `Failed to ${status} leave`)
@@ -140,7 +156,7 @@ export default function Leaves() {
 
       {/* Filter tabs */}
       <div className="flex gap-2 animate-fade-in stagger-2 flex-wrap">
-        {['all', 'pending', 'approved', 'rejected'].map(f => (
+        {['all', 'pending', 'needs_info', 'approved', 'rejected'].map(f => (
           <button key={f} onClick={() => setFilter(f)}
             className={`px-3 py-1.5 rounded-lg text-xs font-mono border transition-all duration-200 capitalize
               ${filter === f
@@ -180,7 +196,7 @@ export default function Leaves() {
 
             return (
               <div key={leave.id}
-                className={`card p-5 transition-all duration-300 ${leave.status === 'pending' ? 'hover:border-amber-400/20' : ''}`}>
+                className={`card p-5 transition-all duration-300 ${(leave.status === 'pending' || leave.status === 'needs_info') ? 'hover:border-amber-400/20' : ''}`}>
                 <div className="flex items-start gap-4">
 
                   {/* Avatar — clickable → employee detail */}
@@ -264,6 +280,54 @@ export default function Leaves() {
                       </p>
                     </div>
 
+                    {/* Medical Evidence */}
+                    {leave.medical_certificate && (
+                      <div className="mt-3">
+                        <button
+                          onClick={() => setShowCert(prev => ({ ...prev, [leave.id]: !prev[leave.id] }))}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-pink-400/10 text-pink-400 border border-pink-400/20 hover:bg-pink-400/20 transition-all mb-2"
+                        >
+                          <ScrollText size={12} />
+                          {showCert[leave.id] ? 'Hide Evidence' : 'View Medical Evidence'}
+                        </button>
+                        {showCert[leave.id] && (
+                          <div className="rounded-lg border border-pink-400/30 overflow-hidden bg-navy-900/80 p-2 animate-fade-in">
+                            {leave.medical_certificate.startsWith('data:image/') || leave.medical_certificate.startsWith('http') ? (
+                              <img 
+                                src={leave.medical_certificate} 
+                                alt="Medical Evidence" 
+                                className="w-full max-h-[400px] object-contain rounded"
+                              />
+                            ) : (
+                              <div className="p-4 text-center">
+                                <p className="text-xs font-mono text-sentinel-muted mb-2">PDF Document</p>
+                                <a 
+                                  href={leave.medical_certificate} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="text-cyan-400 text-xs font-bold hover:underline inline-flex items-center gap-1"
+                                >
+                                  Open Certificate in New Tab <ExternalLink size={10} />
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Thread rendering */}
+                    {leave.comments && leave.comments.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        {leave.comments.map((c, idx) => (
+                          <div key={idx} className={`p-2 rounded border text-xs font-mono max-w-[85%] ${c.sender === 'admin' ? 'bg-cyan-900/20 border-cyan-400/20 text-cyan-300 ml-auto text-right' : 'bg-navy-800 border-sentinel-border/50 text-sentinel-text mr-auto'}`}>
+                            <div className="opacity-50 text-[9px] mb-1">{c.sender === 'admin' ? 'You' : emp?.full_name || 'Employee'} • {new Date(c.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                            {c.message}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     {/* Admin response if already reviewed */}
                     {leave.admin_response && leave.status !== 'pending' && (
                       <p className={`text-xs font-mono mt-1 ${leave.status === 'approved' ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -271,12 +335,12 @@ export default function Leaves() {
                       </p>
                     )}
 
-                    {/* Action panel — pending only */}
-                    {leave.status === 'pending' && (
+                    {/* Action panel — pending or needs_info only */}
+                    {(leave.status === 'pending' || leave.status === 'needs_info') && (
                       <div className="mt-3 space-y-2">
                         <input
                           type="text"
-                          placeholder="Add a response (required before approving or rejecting)..."
+                          placeholder={leave.status === 'needs_info' ? "Wait for employee reply, or send another message..." : "Add a response (required before deciding)..."}
                           value={response[leave.id] || ''}
                           onChange={e => setResponse(prev => ({ ...prev, [leave.id]: e.target.value }))}
                           className="input-field text-xs py-2"
@@ -297,6 +361,14 @@ export default function Leaves() {
                           >
                             <XCircle size={12} />
                             {acting === leave.id ? '...' : 'Reject'}
+                          </button>
+                          <button
+                            onClick={() => act(leave.id, 'needs_info')}
+                            disabled={acting === leave.id}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-cyan-400/10 text-cyan-400 border border-cyan-400/20 hover:bg-cyan-400/20 transition-all disabled:opacity-50 ml-auto"
+                          >
+                            <MessageCircle size={12} />
+                            {acting === leave.id ? '...' : 'Elaborate'}
                           </button>
                         </div>
                       </div>

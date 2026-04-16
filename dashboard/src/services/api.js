@@ -22,6 +22,7 @@ export const authAPI = {
   login:  (d) => api.post('/auth/login', d),
   me:     ()  => api.get('/auth/me'),
   logout: ()  => api.post('/auth/logout'),
+  changePassword: (d) => api.post('/auth/change-password', d),
 }
 
 // ── Admin: Employees ──────────────────────────────────────────
@@ -32,6 +33,7 @@ export const employeesAPI = {
   update:    (id, d)  => api.patch(`/employees/${id}`, d),
   remove:    (id)     => api.delete(`/employees/${id}`),
   sendAlert: (id, d)  => api.post(`/employees/${id}/alert`, d),
+  forcePassword: (id, d) => api.post(`/employees/${id}/force-password`, d),
 }
 
 // ── Sessions (admin + employee) ───────────────────────────────

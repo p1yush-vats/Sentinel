@@ -13,6 +13,8 @@ import threading
 import time
 import httpx
 import ctypes
+import pystray
+from PIL import Image
 
 try:
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("sentinel.desktop.app.1.0")
@@ -110,6 +112,43 @@ class SentinelApp:
         # Set to True by _logout() so _show_main() knows to re-show login
         # after mainloop() returns cleanly (avoids destroying Tk mid-callback).
         self._logout_pending: bool = False
+        
+        self.tray_icon = None
+        self._setup_tray()
+
+    def _setup_tray(self):
+        ico_path = _asset("sentinel.ico")
+        if not ico_path.exists():
+            return
+        try:
+            image = Image.open(str(ico_path))
+            menu = pystray.Menu(
+                pystray.MenuItem("Show Sentinel", self._on_tray_show, default=True),
+                pystray.MenuItem("Exit Sentinel", self._on_tray_exit)
+            )
+            self.tray_icon = pystray.Icon("Sentinel", image, "Sentinel", menu)
+            threading.Thread(target=self.tray_icon.run, daemon=True).start()
+        except Exception as e:
+            print(f"Tray error: {e}")
+
+    def _on_tray_show(self, icon, item):
+        if self.main_window:
+            self.main_window.after(0, self.main_window.deiconify)
+            self.main_window.after(0, self.main_window.lift)
+        elif self.login_window:
+            self.login_window.after(0, self.login_window.deiconify)
+            self.login_window.after(0, self.login_window.lift)
+
+    def _on_tray_exit(self, icon, item):
+        import sys
+        if self.tray_icon:
+            self.tray_icon.stop()
+        if self.main_window:
+            self.main_window.after(0, self.main_window.quit)
+        elif self.login_window:
+            self.login_window.after(0, self.login_window.destroy)
+        else:
+            sys.exit(0)
 
     # ─────────────────────────────────────────────────────────
     def run(self):
@@ -237,6 +276,7 @@ class SentinelApp:
             on_login_success=self._on_login_success,
             api_base_url=Config.API_BASE_URL
         )
+        self.login_window.protocol("WM_DELETE_WINDOW", self.login_window.withdraw)
         self.login_window.mainloop()
         # After mainloop() returns (window closed/logged out), clean up
         try:
@@ -359,6 +399,7 @@ class SentinelApp:
         if self.session_manager:
             self.session_manager.connect_realtime()
             
+        self.main_window.protocol("WM_DELETE_WINDOW", self.main_window.withdraw)
         self.main_window.mainloop()
 
         # mainloop() returned — clean up the window now that we are back

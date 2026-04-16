@@ -6,7 +6,7 @@ import api from '../services/api'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 
-const STATUS_COLORS = { approved: '#00c851', rejected: '#ff4444', pending: '#ffbb00' }
+const STATUS_COLORS = { approved: '#00c851', rejected: '#ff4444', pending: '#ffbb00', needs_info: '#33b5e5' }
 
 function LeaveTypeCard({ type, balance, selected, onClick, theme }) {
   const info = LEAVE_TYPES[type]
@@ -45,6 +45,10 @@ export default function MyLeave() {
   const [reason,       setReason]       = useState('')
   const [submitting,   setSubmitting]   = useState(false)
   const [tab,          setTab]          = useState('apply')
+  const [replyText,    setReplyText]    = useState({})
+  const [replying,     setReplying]     = useState(null)
+  const [medicalCert,  setMedicalCert]  = useState(null)
+  const [certFileName, setCertFileName] = useState('')
   const t = theme
 
   const leaveBalance = calculateLeaveBalance(
@@ -53,28 +57,89 @@ export default function MyLeave() {
     50
   )
 
+  const fetchLeaves = (silent = false) => {
+    if (!silent) setLoading(true)
+    api.get('/leaves/')
+      .then(r => setLeaves(r.data?.leaves || []))
+      .catch(() => {})
+      .finally(() => {
+        if (!silent) setLoading(false)
+      })
+  }
+
   useEffect(() => {
-    api.get('/leaves/').then(r => setLeaves(r.data?.leaves || [])).catch(() => {}).finally(() => setLoading(false))
+    fetchLeaves()
+    const interval = setInterval(() => fetchLeaves(true), 15000)
+    return () => clearInterval(interval)
   }, [])
 
   const workingDays = fromDate && toDate ? workingDaysBetween(new Date(fromDate), new Date(toDate)) : 0
+  const needsCert = selectedType === 'ML' || (selectedType === 'SL' && workingDays >= 3)
 
   const handleApply = async () => {
     if (!fromDate || !toDate || !reason.trim()) { toast.error('Fill all fields'); return }
     if (workingDays <= 0) { toast.error('Invalid date range'); return }
     const bal = leaveBalance[selectedType]
     if (bal && workingDays > bal.balance) { toast.error(`Insufficient ${selectedType} balance (${bal.balance} days left)`); return }
+
+    // Evidence validation
+    if (needsCert && !medicalCert) {
+      toast.error(`Medical certificate is mandatory for ${selectedType === 'ML' ? 'Maternity Leave' : 'Sick Leave (3+ days)'}`)
+      return
+    }
+
     setSubmitting(true)
     try {
-      await api.post('/leaves/', { leave_type: selectedType, from_date: fromDate, to_date: toDate, days_requested: workingDays, reason })
+      await api.post('/leaves/', {
+        leave_type: selectedType,
+        from_date: fromDate,
+        to_date: toDate,
+        days_requested: workingDays,
+        reason,
+        medical_certificate: medicalCert
+      })
       toast.success('Leave application submitted')
-      setFromDate(''); setToDate(''); setReason('')
+      setFromDate(''); setToDate(''); setReason(''); setMedicalCert(null); setCertFileName('')
       const r = await api.get('/leaves/')
       setLeaves(r.data?.leaves || [])
       setTab('history')
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Failed to submit')
     } finally { setSubmitting(false) }
+  }
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('File size must be under 2MB')
+      return
+    }
+
+    setCertFileName(file.name)
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      setMedicalCert(reader.result)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleReply = async (id) => {
+    const text = (replyText[id] || '').trim()
+    if (!text) return toast.error('Enter a response')
+    setReplying(id)
+    try {
+      await api.post(`/leaves/${id}/comment`, { message: text })
+      toast.success('Reply sent')
+      setReplyText(prev => ({ ...prev, [id]: '' }))
+      const r = await api.get('/leaves/')
+      setLeaves(r.data?.leaves || [])
+    } catch (e) {
+      toast.error('Failed to send reply')
+    } finally {
+      setReplying(null)
+    }
   }
 
   const inp = {
@@ -188,6 +253,33 @@ export default function MyLeave() {
                   style={{ ...inp, resize: 'vertical', lineHeight: 1.6 }} />
               </div>
 
+              {(selectedType === 'ML' || selectedType === 'SL') && (
+                <div style={{ marginBottom: 18 }}>
+                  <label style={lbl}>
+                    MEDICAL CERTIFICATE 
+                    {(selectedType === 'ML' || (selectedType === 'SL' && workingDays >= 3)) && (
+                      <span style={{ color: t.danger, marginLeft: 4 }}>* MANDATORY</span>
+                    )}
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <input 
+                      type="file" 
+                      accept="image/*,.pdf" 
+                      onChange={handleFileChange}
+                      style={{ ...inp, opacity: 0, position: 'absolute', inset: 0, cursor: 'pointer', zIndex: 2 }} 
+                    />
+                    <div style={{ 
+                      ...inp, display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                      background: t.card, borderStyle: 'dashed', color: certFileName ? t.accent : t.textMuted,
+                      borderColor: (needsCert && !medicalCert) ? t.danger : t.border
+                    }}>
+                      {certFileName || 'Upload Certificate (Image/PDF)'}
+                    </div>
+                  </div>
+                  <p style={{ fontSize: 9, color: t.textMuted, marginTop: 4 }}>Max Size: 2MB</p>
+                </div>
+              )}
+
               <button
                 onClick={handleApply}
                 disabled={submitting || !fromDate || !toDate || !reason}
@@ -251,10 +343,51 @@ export default function MyLeave() {
                         {leave.admin_response && (
                           <div style={{ fontSize: 10, color: statusColor, marginTop: 3 }}>Admin: {leave.admin_response}</div>
                         )}
+                        {/* Thread rendering */}
+                        {leave.comments && leave.comments.length > 0 && (
+                          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {leave.comments.map((c, idx) => (
+                              <div key={idx} style={{
+                                padding: 8, borderRadius: 4, border: `1px solid ${c.sender === 'employee' ? t.border : 'rgba(51, 181, 229, 0.3)'}`,
+                                fontSize: 10, fontFamily: 'monospace', maxWidth: '90%',
+                                alignSelf: c.sender === 'employee' ? 'flex-end' : 'flex-start',
+                                background: c.sender === 'employee' ? t.surface : 'rgba(51, 181, 229, 0.1)',
+                                color: c.sender === 'employee' ? t.text : '#33b5e5'
+                              }}>
+                                <div style={{ opacity: 0.5, fontSize: 8, marginBottom: 2 }}>
+                                  {c.sender === 'employee' ? 'You' : 'Admin'} • {new Date(c.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                </div>
+                                {c.message}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {/* Reply box if needs_info */}
+                        {leave.status === 'needs_info' && (
+                          <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+                            <input 
+                              type="text" 
+                              placeholder="Type your reply here..." 
+                              value={replyText[leave.id] || ''}
+                              onChange={e => setReplyText(prev => ({ ...prev, [leave.id]: e.target.value }))}
+                              style={{ ...inp, padding: '7px 10px', fontSize: 11, flex: 1 }}
+                            />
+                            <button
+                              onClick={() => handleReply(leave.id)}
+                              disabled={replying === leave.id}
+                              style={{ 
+                                background: 'transparent', border: '1px solid #33b5e5', color: '#33b5e5', fontWeight: 700, 
+                                fontSize: 10, padding: '0 12px', cursor: replying === leave.id ? 'wait' : 'pointer' 
+                              }}
+                            >
+                              {replying === leave.id ? '...' : 'REPLY'}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div style={{ fontSize: 8, letterSpacing: '1px', fontWeight: 700, color: statusColor, background: statusColor + '20', padding: '5px 10px', flexShrink: 0, whiteSpace: 'nowrap' }}>
-                      {leave.status?.toUpperCase()}
+                      {leave.status.replace('_', ' ').toUpperCase()}
                     </div>
                   </div>
                 )

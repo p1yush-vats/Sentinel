@@ -22,16 +22,20 @@ def now_utc():
 
 
 class LeaveCreate(BaseModel):
-    leave_type:     str
-    from_date:      date
-    to_date:        date
-    days_requested: int
-    reason:         str
+    leave_type:          str
+    from_date:           date
+    to_date:             date
+    days_requested:      int
+    reason:              str
+    medical_certificate: Optional[str] = None
 
 
 class LeaveReview(BaseModel):
-    status:         str   # approved | rejected
+    status:         str   # approved | rejected | needs_info
     admin_response: str
+
+class LeaveComment(BaseModel):
+    message: str
 
 
 @router.post("/")
@@ -53,9 +57,10 @@ async def apply_leave(
         leave_type     = data.leave_type,
         from_date      = data.from_date,
         to_date        = data.to_date,
-        days_requested = data.days_requested,
-        reason         = data.reason,
-        status         = 'pending',
+        days_requested      = data.days_requested,
+        reason              = data.reason,
+        medical_certificate = data.medical_certificate,
+        status              = 'pending',
     )
     db.add(leave)
     await db.commit()
@@ -137,15 +142,24 @@ async def review_leave(
     leave = result.scalar_one_or_none()
     if not leave:
         raise HTTPException(status_code=404, detail="Leave not found")
-    if leave.status != 'pending':
-        raise HTTPException(status_code=400, detail="Leave already reviewed")
-    if review.status not in ('approved', 'rejected'):
-        raise HTTPException(status_code=400, detail="Status must be approved or rejected")
+    if leave.status not in ('pending', 'needs_info'):
+        raise HTTPException(status_code=400, detail="Leave already reviewed or not pending")
+    if review.status not in ('approved', 'rejected', 'needs_info'):
+        raise HTTPException(status_code=400, detail="Status must be approved, rejected, or needs_info")
 
     leave.status         = review.status
     leave.admin_response = review.admin_response
     leave.reviewed_by    = uuid.UUID(admin_id)
     leave.reviewed_at    = now_utc()
+    
+    if review.status == 'needs_info' and review.admin_response:
+        comments = list(leave.comments or [])
+        comments.append({
+            "sender": "admin",
+            "message": review.admin_response,
+            "timestamp": now_utc().isoformat()
+        })
+        leave.comments = comments
 
     await db.commit()
     await db.refresh(leave)
@@ -180,3 +194,38 @@ async def cancel_leave(
     await db.delete(leave)
     await db.commit()
     return {"message": "Leave cancelled"}
+
+@router.post("/{leave_id}/comment")
+async def add_comment(
+    leave_id: str,
+    comment:  LeaveComment,
+    user_id:  str = Depends(get_current_user_id),
+    db:       AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Leave).where(Leave.id == leave_id))
+    leave = result.scalar_one_or_none()
+    if not leave:
+        raise HTTPException(status_code=404, detail="Leave not found")
+        
+    is_owner = str(leave.employee_id) == user_id
+    result = await db.execute(select(Employee).where(Employee.id == user_id))
+    emp = result.scalar_one_or_none()
+    if not emp or (not is_owner and emp.role not in ['admin', 'super_admin']):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    sender = "employee" if is_owner else "admin"
+    
+    comments = list(leave.comments or [])
+    comments.append({
+        "sender": sender,
+        "message": comment.message,
+        "timestamp": now_utc().isoformat()
+    })
+    leave.comments = comments
+    
+    if is_owner and leave.status == 'needs_info':
+        leave.status = 'pending'
+
+    await db.commit()
+    await db.refresh(leave)
+    return {"message": "Comment added", "leave": leave.to_dict()}

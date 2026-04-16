@@ -3,13 +3,16 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useTheme, THEMES } from './ThemeContext'
 import { useAuthStore } from '../store/authStore'
 
+import { LayoutDashboard, Clock, CheckSquare, Flag, Calendar, Settings as SettingsIcon, FileText, Menu, ChevronUp, ChevronDown, ArrowUpRight, X } from 'lucide-react'
+
 const NAV = [
-  { path: '/my/dashboard', label: 'DASHBOARD',   short: 'HOME',     icon: '⌂' },
-  { path: '/my/sessions',  label: 'MY SESSIONS',  short: 'SESSIONS', icon: '◷' },
-  { path: '/my/tasks',     label: 'MY TASKS',     short: 'TASKS',    icon: '✓' },
-  { path: '/my/flags',     label: 'MY FLAGS',     short: 'FLAGS',    icon: '⚑' },
-  { path: '/my/leave',     label: 'LEAVE',        short: 'LEAVE',    icon: '◻' },
-  { path: '/my/calendar',  label: 'CALENDAR',     short: 'CAL',      icon: '▦' },
+  { path: '/my/dashboard', label: 'DASHBOARD',   short: 'HOME',     icon: LayoutDashboard },
+  { path: '/my/sessions',  label: 'MY SESSIONS',  short: 'SESSIONS', icon: Clock },
+  { path: '/my/tasks',     label: 'MY TASKS',     short: 'TASKS',    icon: CheckSquare },
+  { path: '/my/flags',     label: 'MY FLAGS',     short: 'FLAGS',    icon: Flag },
+  { path: '/my/leave',     label: 'LEAVE',        short: 'LEAVE',    icon: FileText },
+  { path: '/my/calendar',  label: 'CALENDAR',     short: 'CAL',      icon: Calendar },
+  { path: '/my/settings',  label: 'SETTINGS',     short: 'PREFS',    icon: SettingsIcon },
 ]
 
 export default function EmployeeLayout() {
@@ -84,9 +87,9 @@ export default function EmployeeLayout() {
             <button
               className="emp-close-btn"
               onClick={() => setSidebarOpen(false)}
-              style={{ background: 'transparent', border: 'none', color: t.textMuted, cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '2px 4px' }}
+              style={{ background: 'transparent', border: 'none', color: t.textMuted, cursor: 'pointer', padding: '4px' }}
             >
-              ✕
+              <X size={16} />
             </button>
           </div>
           {/* Avatar row */}
@@ -135,7 +138,7 @@ export default function EmployeeLayout() {
                 onMouseEnter={e => { if (!active) { e.currentTarget.style.color = t.text; e.currentTarget.style.background = t.card } }}
                 onMouseLeave={e => { if (!active) { e.currentTarget.style.color = t.textMuted; e.currentTarget.style.background = 'transparent' } }}
               >
-                <span style={{ fontSize: 14 }}>{item.icon}</span>
+                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><item.icon size={16} strokeWidth={2.5} /></span>
                 {item.label}
               </div>
             )
@@ -179,7 +182,7 @@ export default function EmployeeLayout() {
             }}
           >
             <span>THEME: {THEMES[themeName]?.name?.toUpperCase()}</span>
-            <span>{themeOpen ? '▲' : '▼'}</span>
+            <span>{themeOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
           </button>
           {isAdmin && (
             <button
@@ -187,10 +190,10 @@ export default function EmployeeLayout() {
               style={{
                 width: '100%', padding: '8px 10px', background: t.accent, border: 'none',
                 color: '#fff', fontSize: 9, letterSpacing: '2px', fontWeight: 900,
-                cursor: 'pointer', fontFamily: 'inherit',
+                cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px'
               }}
             >
-              → ADMIN VIEW
+              ADMIN <ArrowUpRight size={12} />
             </button>
           )}
           <button
@@ -230,7 +233,7 @@ export default function EmployeeLayout() {
               display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
             }}
           >
-            ☰
+            <Menu size={18} />
           </button>
           <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: '3px', color: t.accent }}>
             SENTINEL
@@ -248,7 +251,7 @@ export default function EmployeeLayout() {
                 cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
               }}
             >
-              ADMIN ↗
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>ADMIN <ArrowUpRight size={10} /></span>
             </button>
           )}
         </div>
@@ -296,7 +299,7 @@ export default function EmployeeLayout() {
                   transition: 'all 0.14s',
                 }}
               >
-                <span style={{ fontSize: 18, lineHeight: 1 }}>{item.icon}</span>
+                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 2 }}><item.icon size={18} strokeWidth={2.5} /></span>
                 <span style={{ fontSize: 7, letterSpacing: '1.5px', fontWeight: 700, marginTop: 2 }}>{item.short}</span>
               </button>
             )

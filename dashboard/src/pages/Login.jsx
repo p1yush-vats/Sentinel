@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
-import { Eye, EyeOff, AlertCircle } from 'lucide-react'
+import { Eye, EyeOff, AlertCircle, Mail, Lock, Download, Monitor } from 'lucide-react'
 import LightPillar from '../components/ui/LightPillar'
 
 /* ── Smooth animated gradient palette ── */
@@ -80,8 +80,8 @@ export default function Login() {
   return (
     <div className="min-h-screen bg-sentinel-bg flex overflow-hidden relative">
 
-      {/* ── Mobile full-screen pillar background ── */}
-      <div className="lg:hidden absolute inset-0 z-0">
+      {/* ── Full-screen animated background ── */}
+      <div className="absolute inset-0 z-0">
         <div style={{
           position: 'absolute', inset: '-60%',
           transform: 'rotate(45deg) scale(2)',
@@ -100,25 +100,9 @@ export default function Login() {
         }} />
       </div>
 
-      {/* ── Desktop left panel ── */}
-      <div className="hidden lg:flex flex-1 items-end justify-start relative overflow-hidden">
-        <div style={{
-          position: 'absolute', inset: '-40%',
-          transform: 'rotate(45deg) scale(1.6)',
-          transformOrigin: 'center center',
-        }}>
-          <LightPillar
-            topColor={topColor} bottomColor={bottomColor}
-            intensity={1.4} rotationSpeed={0.18} interactive={false}
-            glowAmount={0.007} pillarWidth={2.2} pillarHeight={0.3}
-            noiseIntensity={0.35} mixBlendMode="screen" quality="high"
-          />
-        </div>
-        <div style={{
-          position: 'absolute', inset: 0,
-          background: 'linear-gradient(135deg, rgba(2,8,24,0.55) 0%, rgba(2,8,24,0.15) 50%, rgba(2,8,24,0.65) 100%)',
-          pointerEvents: 'none',
-        }} />
+      {/* ── Desktop left panel (Branding container) ── */}
+      <div className="hidden lg:flex flex-1 items-end justify-start relative">
+
         <div className="relative z-10 p-16 pb-20">
           <div className="glow-line mb-6 max-w-xs" />
           <h1 className="font-display font-bold text-4xl text-white leading-tight drop-shadow-lg">
@@ -128,6 +112,32 @@ export default function Login() {
           <p className="mt-4 text-white/60 font-body text-sm leading-relaxed max-w-sm">
             Real-time workforce monitoring, behavioral analytics, and integrity enforcement for modern enterprises.
           </p>
+
+          {/* Desktop Download Client Button */}
+          <div className="mt-12 animate-fade-in stagger-2">
+            <a 
+              href="https://drive.google.com/uc?export=download&id=1UlCMSVUt1VGfu-B9AH-DVlO4C35XC9QC" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              download
+              className="group inline-flex items-center gap-3 px-6 py-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all duration-300 backdrop-blur-sm"
+              style={{ borderLeftColor: `${topColor}44`, borderTopColor: `${topColor}44` }}
+            >
+              <div 
+                className="w-10 h-10 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform duration-300"
+                style={{ background: `${topColor}11`, border: `1px solid ${topColor}33` }}
+              >
+                <Monitor size={20} style={{ color: topColor }} />
+              </div>
+              <div className="text-left">
+                <div className="text-[10px] font-mono text-white/40 uppercase tracking-widest leading-none mb-1">Desktop Client</div>
+                <div className="text-sm font-display font-medium text-white/90 tracking-wide">Download for Windows</div>
+              </div>
+              <div className="ml-2 opacity-30 group-hover:opacity-100 transition-opacity">
+                <Download size={14} className="text-white" />
+              </div>
+            </a>
+          </div>
         </div>
         <div className="absolute top-8 left-8 w-12 h-12 border-l-2 border-t-2 rounded-tl-lg z-10"
           style={{ borderColor: `${topColor}50`, transition: 'border-color 0.8s ease' }} />
@@ -142,7 +152,7 @@ export default function Login() {
         flex flex-col items-center justify-center
         min-h-screen
         px-5 py-10
-        lg:bg-navy-900 lg:border-l lg:border-sentinel-border
+        lg:bg-[#0a1628]/30 lg:backdrop-blur-xl lg:border-l lg:border-white/10
       ">
 
         {/* Mobile branding strip */}
@@ -159,9 +169,8 @@ export default function Login() {
           <p className="text-white/45 text-xs mt-2 leading-relaxed">Real-time workforce monitoring & behavioral analytics</p>
         </div>
 
-        {/* Form card */}
         <div
-          className="w-full max-w-sm animate-fade-in rounded-2xl lg:rounded-none lg:shadow-none p-6 lg:p-0"
+          className="w-full max-w-sm animate-fade-in rounded-2xl p-6 lg:p-0 lg:!bg-transparent lg:!border-transparent lg:!backdrop-blur-none"
           style={{
             background: 'rgba(10,22,40,0.72)',
             borderColor: `${topColor}22`,
@@ -224,26 +233,30 @@ export default function Login() {
             <p className="text-sentinel-muted text-sm mt-1">Admins → Dashboard · Employees → My Portal</p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="label mb-2 block">Email address</label>
-              <input
-                type="email" value={email} onChange={e => setEmail(e.target.value)}
-                className="input-field" placeholder="your@email.com"
-                required autoComplete="email"
-              />
+              <label className="label mb-2 block text-sentinel-muted">Email address</label>
+              <div className="relative">
+                <Mail size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-sentinel-muted" />
+                <input
+                  type="email" value={email} onChange={e => setEmail(e.target.value)}
+                  className="input-field pl-11" placeholder="your@email.com"
+                  required autoComplete="email"
+                />
+              </div>
             </div>
             <div>
-              <label className="label mb-2 block">Password</label>
+              <label className="label mb-2 block text-sentinel-muted">Password</label>
               <div className="relative">
+                <Lock size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-sentinel-muted" />
                 <input
                   type={showPass ? 'text' : 'password'} value={password}
                   onChange={e => setPassword(e.target.value)}
-                  className="input-field pr-11" placeholder="••••••••"
+                  className="input-field pl-11 pr-11" placeholder="••••••••"
                   required autoComplete="current-password"
                 />
                 <button type="button" onClick={() => setShowPass(!showPass)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-sentinel-muted hover:text-sentinel-text transition-colors">
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-sentinel-muted hover:text-sentinel-text transition-colors">
                   {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
@@ -272,8 +285,19 @@ export default function Login() {
             </button>
           </form>
 
-          <div className="mt-6 pt-5 border-t border-sentinel-border/40">
+          <div className="mt-6 pt-5 border-t border-sentinel-border/40 flex flex-col items-center gap-4">
             <p className="text-xs font-mono text-sentinel-muted text-center">SENTINEL v1.0 · All activity logged</p>
+            
+            {/* Secondary Download Link (Mobile focus) */}
+            <a 
+              href="https://drive.google.com/uc?export=download&id=1UlCMSVUt1VGfu-B9AH-DVlO4C35XC9QC"
+              target="_blank"
+              rel="noopener noreferrer"
+              download
+              className="lg:hidden flex items-center gap-2 text-[10px] font-mono font-bold tracking-widest text-sentinel-muted hover:text-cyan-400 transition-colors uppercase"
+            >
+              <Monitor size={12} /> Get Desktop App <Download size={10} />
+            </a>
           </div>
         </div>
 

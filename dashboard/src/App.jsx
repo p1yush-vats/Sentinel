@@ -26,6 +26,7 @@ import MyFlags from './employee/MyFlags'
 import MyLeave from './employee/MyLeave'
 import MyCalendar from './employee/MyCalendar'
 import MyTasks from './employee/MyTasks'
+import MySettings from './employee/MySettings'
 
 function AdminRoute({ children }) {
   const { token, user } = useAuthStore()
@@ -93,6 +94,7 @@ export default function App() {
           <Route path="leave"     element={<MyLeave />} />
           <Route path="calendar"  element={<MyCalendar />} />
           <Route path="tasks"     element={<MyTasks />} />
+          <Route path="settings"  element={<MySettings />} />
         </Route>
 
         <Route path="*" element={<RootRedirect />} />

@@ -32,7 +32,7 @@ async def _compute_employee_risk(db: AsyncSession, employee_id: str) -> float:
         select(Session.risk_score)
         .where(
             Session.employee_id == employee_id,
-            Session.status == "completed",
+            Session.status != "active",
             Session.risk_score.isnot(None),
         )
         .order_by(desc(Session.start_time))
@@ -103,12 +103,44 @@ async def get_employees(
     query = query.order_by(desc(Employee.created_at)).limit(limit).offset(offset)
     result = await db.execute(query)
     employees = result.scalars().all()
+    emp_ids = [emp.id for emp in employees]
 
-    # Compute risk_score per employee from last 10 sessions
+    # Bulk fetch sessions for all employees to solve N+1 connection latency
+    emp_sessions = {}
+    if emp_ids:
+        q_sess = (
+            select(Session.employee_id, Session.risk_score)
+            .where(
+                Session.employee_id.in_(emp_ids),
+                Session.status != "active",
+                Session.risk_score.isnot(None),
+            )
+            .order_by(desc(Session.start_time))
+            # No limit here, we'll slice grouping in memory which is fast since it's just 1 query
+        )
+        s_result = await db.execute(q_sess)
+        for row in s_result.fetchall():
+            eid = str(row[0])
+            score = float(row[1])
+            if eid not in emp_sessions:
+                emp_sessions[eid] = []
+            if len(emp_sessions[eid]) < 10:
+                emp_sessions[eid].append(score)
+
     employee_dicts = []
     for emp in employees:
         d = emp.to_dict()
-        d["risk_score"] = await _compute_employee_risk(db, str(emp.id))
+        scores = emp_sessions.get(str(emp.id), [])
+        if not scores:
+            d["risk_score"] = 0.0
+        else:
+            total_w, total_s = 0.0, 0.0
+            for i, score in enumerate(scores):
+                weight = 2.0 if i < 5 else 1.0
+                total_s += score * weight
+                total_w += weight
+            d["risk_score"] = round(total_s / total_w, 1)
+
         employee_dicts.append(d)
 
     return {"employees": employee_dicts, "total": len(employee_dicts)}
@@ -222,3 +254,30 @@ async def alert_employee(
     await manager.send_personal_message(payload, employee_id)
     
     return {"message": "Alert sent"}
+
+
+class ForcePasswordRequest(BaseModel):
+    new_password: str
+
+@router.post("/{employee_id}/force-password", dependencies=[Depends(RoleChecker(["admin"]))])
+async def force_change_password(
+    employee_id:  str,
+    request_data: ForcePasswordRequest,
+    admin_id:     str = Depends(get_current_user_id),
+    db:           AsyncSession = Depends(get_db)
+):
+    result = await db.execute(select(Employee).where(Employee.id == employee_id))
+    employee = result.scalar_one_or_none()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    employee.password_hash = get_password_hash(request_data.new_password)
+    await db.commit()
+
+    from .audit_log import write_audit
+    await write_audit(db, "password_force_reset", "admin_force_password_reset",
+                      actor_id=admin_id, target_id=str(employee.id), target_type="employee",
+                      metadata={"admin": admin_id})
+    await db.commit()
+
+    return {"message": "Password successfully forced"}

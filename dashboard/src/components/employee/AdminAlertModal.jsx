@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { AlertTriangle, Send, X } from 'lucide-react'
 
 export default function AdminAlertModal({ isOpen, onClose, onSend, employeeName }) {
@@ -16,8 +17,8 @@ export default function AdminAlertModal({ isOpen, onClose, onSend, employeeName 
     onClose()
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in">
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in p-4">
       <div className="bg-navy-800 border border-sentinel-border rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-slide-up relative">
         <div className="p-4 border-b border-sentinel-border bg-navy-900/50 flex justify-between items-center">
           <div className="flex items-center gap-2 text-sentinel-text">
@@ -60,6 +61,6 @@ export default function AdminAlertModal({ isOpen, onClose, onSend, employeeName 
           </button>
         </div>
       </div>
-    </div>
+    </div>, document.body
   )
 }

@@ -38,9 +38,13 @@ export default function TopFlagged({ employees = [], loading, onEmployeeClick, a
                   animate-fade-in stagger-${Math.min(i+1,5)}`}
               >
                 <div className="relative shrink-0">
-                  <div className="w-8 h-8 rounded-full bg-red-400/10 border border-red-400/20 flex items-center justify-center text-xs font-mono text-red-400 font-bold">
-                    {initials(emp.full_name)}
-                  </div>
+                  {emp.avatar_url ? (
+                    <img src={emp.avatar_url} alt={emp.full_name} className="w-8 h-8 rounded-full object-cover border border-sentinel-border" />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-red-400/10 border border-red-400/20 flex items-center justify-center text-xs font-mono text-red-400 font-bold">
+                      {initials(emp.full_name)}
+                    </div>
+                  )}
                   {isActive && (
                     <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-400 border-2 border-navy-800 animate-pulse" />
                   )}

@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, useNavigate } from 'react-router-dom'
 import { employeesAPI, sessionsAPI, flagsAPI, appealsAPI, reportsAPI } from '../services/api'
 import {
@@ -14,7 +15,7 @@ import {
   ArrowLeft, Clock, AlertTriangle, MessageSquare,
   Shield, Mail, Phone, Building2, BadgeCheck,
   UserX, UserCheck, ChevronDown, ChevronUp,
-  Activity, Zap, Award, Download
+  Activity, Zap, Award, Download, KeyRound
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import SpotlightCard from '../components/ui/SpotlightCard'
@@ -166,6 +167,9 @@ export default function EmployeeDetail() {
   const [tab,      setTab]      = useState('overview')
   const [toggling, setToggling] = useState(false)
   const [alertModalOpen, setAlertModalOpen] = useState(false)
+  const [resetModalOpen, setResetModalOpen] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [resetting, setResetting] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -217,7 +221,7 @@ export default function EmployeeDetail() {
   // ── Computed ──────────────────────────────────────────────
   const completed = sessions.filter(s => s.status === 'completed')
   const totalWork = sessions.reduce((a, s) => a + (s.total_work_minutes || 0), 0)
-  const avgWork   = completed.length ? Math.round(totalWork / completed.length) : 0
+  const avgWork   = sessions.length ? Math.round(totalWork / sessions.length) : 0
   const riskScore = Math.round(employee?.risk_score || 0)
   const color     = deptColor(employee?.department)
 
@@ -338,6 +342,11 @@ export default function EmployeeDetail() {
                     className="flex items-center gap-1.5 text-xs font-mono px-3 py-1.5 rounded-lg border border-blue-500/20 text-blue-400 hover:bg-blue-400/10 transition-all">
                     <MessageSquare size={12} />
                     Alert
+                  </button>
+                  <button onClick={() => setResetModalOpen(true)}
+                    className="flex items-center gap-1.5 text-xs font-mono px-3 py-1.5 rounded-lg border border-amber-500/20 text-amber-500 hover:bg-amber-500/10 transition-all">
+                    <KeyRound size={12} />
+                    Reset Key
                   </button>
                   <button onClick={handleDownloadDossier}
                     className="flex items-center gap-1.5 text-xs font-mono px-3 py-1.5 rounded-lg border border-purple-500/20 text-purple-400 hover:bg-purple-400/10 transition-all">
@@ -621,7 +630,7 @@ export default function EmployeeDetail() {
         </div>
       )}
 
-      <AdminAlertModal 
+        <AdminAlertModal 
         isOpen={alertModalOpen} 
         onClose={() => setAlertModalOpen(false)} 
         employeeName={employee.full_name}
@@ -634,6 +643,54 @@ export default function EmployeeDetail() {
           }
         }}
       />
+
+      {resetModalOpen && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-navy-800 border border-amber-500/30 rounded-xl p-6 w-full max-w-sm shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 left-0 right-0 h-1 bg-amber-500" />
+            <h3 className="font-display font-bold text-lg mb-2 text-amber-500 flex items-center gap-2">
+              <KeyRound size={18} /> Force Reset Password
+            </h3>
+            <p className="text-xs font-mono text-sentinel-muted mb-4">
+              Enter a new password for <strong className="text-sentinel-text">{employee.full_name}</strong>. They will use this to sign in immediately.
+            </p>
+            <input 
+              type="text" 
+              placeholder="New secure password" 
+              className="input-field w-full mb-4"
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              autoFocus
+            />
+            <div className="flex gap-2 justify-end">
+              <button 
+                onClick={() => { setResetModalOpen(false); setNewPassword(''); }}
+                className="btn-ghost text-xs"
+                disabled={resetting}
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={async () => {
+                  if (newPassword.length < 6) return toast.error('Minimum 6 characters')
+                  setResetting(true)
+                  try {
+                    await employeesAPI.forcePassword(employee.id, { new_password: newPassword })
+                    toast.success('Password force reset successful')
+                    setResetModalOpen(false)
+                    setNewPassword('')
+                  } catch { toast.error('Failed to reset password') }
+                  finally { setResetting(false) }
+                }}
+                className="btn-primary bg-amber-500 hover:bg-amber-600 text-black text-xs"
+                disabled={resetting}
+              >
+                {resetting ? 'Applying...' : 'Confirm Reset'}
+              </button>
+            </div>
+          </div>
+        </div>, document.body
+      )}
     </div>
   )
 }
