@@ -3,8 +3,8 @@ venv/
 backend/venv/
 desktop-app/venv/
 # environment variables
-
-
+desktop-app/dist/
+dashboard/node_modules
 # python cache
 __pycache__/
 *.pyc

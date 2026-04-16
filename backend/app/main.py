@@ -1,7 +1,4 @@
-"""
-SENTINEL Backend API - Main Application
-"""
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
@@ -9,66 +6,22 @@ import logging
 
 from .core.config import settings
 from .core.database import init_db, close_db
-from .api import auth, sessions, employees, abnormalities, reports
+from .api import (
+    auth, sessions, employees, abnormalities, reports,
+    appeals, audit_log, work_rules,
+    notification_preferences, productivity_metrics, leaves, tasks,
+)
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-# WebSocket connection manager
-class ConnectionManager:
-    """Manage WebSocket connections for real-time updates"""
-    
-    def __init__(self):
-        self.active_connections: dict[str, list[WebSocket]] = {}
-    
-    async def connect(self, websocket: WebSocket, user_id: str):
-        """Connect a new WebSocket client"""
-        await websocket.accept()
-        if user_id not in self.active_connections:
-            self.active_connections[user_id] = []
-        self.active_connections[user_id].append(websocket)
-        logger.info(f"WebSocket connected: {user_id}")
-    
-    def disconnect(self, websocket: WebSocket, user_id: str):
-        """Disconnect a WebSocket client"""
-        if user_id in self.active_connections:
-            self.active_connections[user_id].remove(websocket)
-            if not self.active_connections[user_id]:
-                del self.active_connections[user_id]
-        logger.info(f"WebSocket disconnected: {user_id}")
-    
-    async def send_personal_message(self, message: dict, user_id: str):
-        """Send message to specific user"""
-        if user_id in self.active_connections:
-            for connection in self.active_connections[user_id]:
-                try:
-                    await connection.send_json(message)
-                except Exception as e:
-                    logger.error(f"Error sending message: {e}")
-    
-    async def broadcast(self, message: dict):
-        """Broadcast message to all connected clients"""
-        for user_connections in self.active_connections.values():
-            for connection in user_connections:
-                try:
-                    await connection.send_json(message)
-                except Exception as e:
-                    logger.error(f"Error broadcasting: {e}")
+from .core.websocket import manager
 
 
-manager = ConnectionManager()
-
-
-# Lifespan events
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup and shutdown events"""
-    # Startup
     logger.info("Starting SENTINEL Backend...")
-    
-    # Try to initialize database, but don't fail if it doesn't work
     try:
         await init_db()
         logger.info("Database initialized successfully")
@@ -76,10 +29,7 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Database initialization failed: {e}")
         logger.warning("Server will start but database features may not work")
         logger.warning("Check your DATABASE_URL in .env file")
-    
     yield
-    
-    # Shutdown
     logger.info("Shutting down SENTINEL Backend...")
     try:
         await close_db()
@@ -88,16 +38,15 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Database cleanup failed: {e}")
 
 
-# Create FastAPI app
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     lifespan=lifespan,
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    redirect_slashes=False,
 )
 
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
@@ -107,10 +56,8 @@ app.add_middleware(
 )
 
 
-# Health check endpoint
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
     return {
         "status": "healthy",
         "app": settings.APP_NAME,
@@ -118,10 +65,8 @@ async def health_check():
     }
 
 
-# Root endpoint
 @app.get("/")
 async def root():
-    """Root endpoint"""
     return {
         "message": "SENTINEL Work Integrity System API",
         "version": settings.APP_VERSION,
@@ -129,21 +74,36 @@ async def root():
     }
 
 
-# WebSocket endpoint
+@app.websocket("/ws/admin-feed")
+async def admin_feed_endpoint(websocket: WebSocket):
+    """
+    Dedicated WebSocket endpoint for the admin dashboard Live Feed.
+    Must be declared BEFORE /ws/{user_id} so FastAPI matches the literal
+    path instead of capturing 'admin-feed' as a user_id parameter.
+
+    Connects under the reserved key 'admin-feed' so manager.broadcast()
+    fans all real-time events (sessions, abnormalities, tasks) to every
+    connected admin dashboard tab automatically.
+    """
+    ADMIN_FEED_KEY = "admin-feed"
+    await manager.connect(websocket, ADMIN_FEED_KEY)
+    try:
+        while True:
+            # Keep connection alive; dashboard only listens, never sends
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, ADMIN_FEED_KEY)
+    except Exception as e:
+        logger.error(f"Admin feed WebSocket error: {e}")
+        manager.disconnect(websocket, ADMIN_FEED_KEY)
+
+
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
-    """
-    WebSocket endpoint for real-time updates
-    
-    Clients connect with: ws://localhost:8000/ws/{user_id}
-    """
     await manager.connect(websocket, user_id)
     try:
         while True:
-            # Receive messages from client
             data = await websocket.receive_json()
-            
-            # Echo back for now (can add logic later)
             await manager.send_personal_message(
                 {"type": "echo", "data": data},
                 user_id
@@ -155,42 +115,24 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
         manager.disconnect(websocket, user_id)
 
 
-# Include routers
-app.include_router(
-    auth.router,
-    prefix=f"{settings.API_V1_PREFIX}/auth",
-    tags=["Authentication"]
-)
+# Original routers
+app.include_router(auth.router,          prefix=f"{settings.API_V1_PREFIX}/auth",          tags=["Authentication"])
+app.include_router(sessions.router,      prefix=f"{settings.API_V1_PREFIX}/sessions",       tags=["Sessions"])
+app.include_router(employees.router,     prefix=f"{settings.API_V1_PREFIX}/employees",      tags=["Employees"])
+app.include_router(abnormalities.router, prefix=f"{settings.API_V1_PREFIX}/abnormalities",  tags=["Abnormalities"])
+app.include_router(reports.router,       prefix=f"{settings.API_V1_PREFIX}/reports",        tags=["Reports"])
 
-app.include_router(
-    sessions.router,
-    prefix=f"{settings.API_V1_PREFIX}/sessions",
-    tags=["Sessions"]
-)
+# New routers — all tables now wired
+app.include_router(appeals.router,                  prefix=f"{settings.API_V1_PREFIX}/appeals",               tags=["Appeals"])
+app.include_router(audit_log.router,                prefix=f"{settings.API_V1_PREFIX}/audit",                 tags=["Audit Log"])
+app.include_router(work_rules.router,               prefix=f"{settings.API_V1_PREFIX}/work-rules",            tags=["Work Rules"])
+app.include_router(notification_preferences.router, prefix=f"{settings.API_V1_PREFIX}/notification-prefs",    tags=["Notification Preferences"])
+app.include_router(productivity_metrics.router,     prefix=f"{settings.API_V1_PREFIX}/productivity-metrics",  tags=["Productivity Metrics"])
+app.include_router(leaves.router, prefix=f"{settings.API_V1_PREFIX}/leaves", tags=["Leaves"])
+app.include_router(tasks.router,  prefix=f"{settings.API_V1_PREFIX}/tasks",  tags=["Tasks"])
 
-app.include_router(
-    employees.router,
-    prefix=f"{settings.API_V1_PREFIX}/employees",
-    tags=["Employees"]
-)
-
-app.include_router(
-    abnormalities.router,
-    prefix=f"{settings.API_V1_PREFIX}/abnormalities",
-    tags=["Abnormalities"]
-)
-
-app.include_router(
-    reports.router,
-    prefix=f"{settings.API_V1_PREFIX}/reports",
-    tags=["Reports"]
-)
-
-
-# Global exception handler
 @app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    """Handle all unhandled exceptions"""
+async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled exception: {exc}")
     return JSONResponse(
         status_code=500,
@@ -201,5 +143,4 @@ async def global_exception_handler(request, exc):
     )
 
 
-# Export manager for use in other modules
 __all__ = ["app", "manager"]

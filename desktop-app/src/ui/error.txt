@@ -1,0 +1,308 @@
+PS C:\Users\Piyush\Desktop\sentinel\desktop-app> desktop
+cd : Cannot find path 'C:\Users\Piyush\Desktop\sentinel\desktop-app\desktop-app' because it does not exist.
+At C:\Users\Piyush\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1:6 char:5
++     cd desktop-app
++     ~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (C:\Users\Piyush...app\desktop-app:String) [Set-Location], ItemNotFoundException
+    + FullyQualifiedErrorId : PathNotFound,Microsoft.PowerShell.Commands.SetLocationCommand
+ 
+==================================================
+  SENTINEL Desktop App v1.0.0
+  API: http://127.0.0.1:8000
+  DB : C:\Users\Piyush\.sentinel\sentinel.db
+==================================================
+Login OK: piyush vats (admin)
+Initializing components…
+  ✓ Background flush started (every 60s)
+Components ready.
+🔗 Connecting to backend: http://127.0.0.1:8000/api/v1/sessions/start
+   Headers: Authorization Bearer eyJhbGciOiJIUzI1NiIs...
+📡 Backend response: 200
+❌ Unexpected error: 'session'
+Traceback (most recent call last):
+  File "C:\Users\Piyush\Desktop\sentinel\desktop-app\src\core\session_manager.py", line 86, in start_session
+    self.backend_session_id = data["session"]["id"]
+                              ~~~~^^^^^^^^^^^
+KeyError: 'session'
+Sync error: Offline: 'session'
+  ✓ AbnormalityAggregator ready (session: 45bac288...)
+✓ Input collector started (privacy-safe mode)
+✓ Paste detection active (Windows API)
+✓ Clipboard size detection active
+✓ Idle detection active
+Detection pipeline started
+
+🔄 Flush cycle: 1 record(s) to sync (1 sessions, 0 abnormality records)
+  🔴 Backend offline — working locally ('session')
+  📊 Flush complete: 0 synced, 1 pending
+  📊 [suspicious_paste] x1 | conf=99% | sev=CRITICAL
+     💾 Saved to SQLite [CRITICAL | 99%]
+  📊 [suspicious_paste] x2 | conf=99% | sev=CRITICAL
+     💾 Saved to SQLite [CRITICAL | 99%]
+  📊 [suspicious_paste] x3 | conf=99% | sev=CRITICAL
+     💾 Saved to SQLite [CRITICAL | 99%]
+  📊 [rapid_paste] x1 | conf=80% | sev=MEDIUM
+     💾 Saved to SQLite [CRITICAL | 99%]
+  📊 [suspicious_paste] x4 | conf=99% | sev=CRITICAL
+     💾 Saved to SQLite [CRITICAL | 99%]
+  📊 [rapid_paste] x2 | conf=80% | sev=MEDIUM
+     💾 Saved to SQLite [CRITICAL | 99%]
+  📊 [suspicious_paste] x5 | conf=99% | sev=CRITICAL
+     💾 Saved to SQLite [CRITICAL | 99%]
+  📊 [rapid_paste] x3 | conf=80% | sev=MEDIUM
+     💾 Saved to SQLite [CRITICAL | 99%]
+  📊 [suspicious_paste] x6 | conf=99% | sev=CRITICAL
+     💾 Saved to SQLite [CRITICAL | 99%]
+  📊 [rapid_paste] x4 | conf=80% | sev=MEDIUM
+     💾 Saved to SQLite [CRITICAL | 99%]
+  📊 [suspicious_paste] x7 | conf=99% | sev=CRITICAL
+     💾 Saved to SQLite [CRITICAL | 99%]
+  📊 [rapid_paste] x5 | conf=80% | sev=HIGH
+     💾 Saved to SQLite [CRITICAL | 99%]
+  📊 [suspicious_paste] x8 | conf=99% | sev=CRITICAL
+     💾 Saved to SQLite [CRITICAL | 99%]
+  📊 [rapid_paste] x6 | conf=80% | sev=HIGH
+     💾 Saved to SQLite [CRITICAL | 99%]
+  📊 [suspicious_paste] x9 | conf=99% | sev=CRITICAL
+     💾 Saved to SQLite [CRITICAL | 99%]
+  📊 [rapid_paste] x7 | conf=80% | sev=HIGH
+     💾 Saved to SQLite [CRITICAL | 99%]
+  📊 [paste_heavy_work] x1 | conf=100% | sev=CRITICAL
+     💾 Saved to SQLite [CRITICAL | 100%]
+
+🔄 Flush cycle: 2 record(s) to sync (1 sessions, 1 abnormality records)
+  📊 Flush complete: 0 synced, 2 pending
+  📊 [paste_heavy_work] x2 | conf=100% | sev=CRITICAL
+     💾 Saved to SQLite [CRITICAL | 100%]
+✓ Input collector stopped
+Detection pipeline stopped
+Work log saved: work (2 min)
+     💾 Saved to SQLite [CRITICAL | 100%]
+  ✅ Aggregator flushed: 3 type(s) | CRITICAL | 100%
+Abnormality summary: 3 type(s)
+
+🔄 Final sync before closing session...
+
+🔄 Flush cycle: 2 record(s) to sync (1 sessions, 1 abnormality records)
+  📊 Flush complete: 0 synced, 2 pending
+Detection loop stopped
+Logging out…
+Logged out.
+bgerror failed to handle background error.
+    Original error: invalid command name "2826761783808_click_animation"
+    Error in bgerror: can't invoke "tk" command: application has been destroyed
+Exception in Tkinter callback
+Traceback (most recent call last):
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\tkinter\__init__.py", line 1968, in __call__
+    return self.func(*args)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\desktop-app\venv\Lib\site-packages\customtkinter\windows\widgets\ctk_button.py", line 554, in _clicked
+    self._command()
+  File "C:\Users\Piyush\Desktop\sentinel\desktop-app\src\ui\main_window.py", line 966, in _logout
+    self.on_logout()
+  File "C:\Users\Piyush\Desktop\sentinel\desktop-app\src\main.py", line 302, in _logout
+    self._show_login()
+  File "C:\Users\Piyush\Desktop\sentinel\desktop-app\src\main.py", line 257, in _show_login
+    self.login_window = LoginWindow(
+                        ^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\desktop-app\src\ui\login_window.py", line 70, in __init__
+    self._build()
+  File "C:\Users\Piyush\Desktop\sentinel\desktop-app\src\ui\login_window.py", line 96, in _build
+    ctk.CTkLabel(logo_f, image=self._shield_img, text="").pack()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\desktop-app\venv\Lib\site-packages\customtkinter\windows\widgets\ctk_label.py", line 104, in __init__
+    self._update_image()
+  File "C:\Users\Piyush\Desktop\sentinel\desktop-app\venv\Lib\site-packages\customtkinter\windows\widgets\ctk_label.py", line 141, in _update_image
+    self._label.configure(image=self._image.create_scaled_photo_image(self._get_widget_scaling(),
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\tkinter\__init__.py", line 1722, in configure
+    return self._configure('configure', cnf, kw)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\tkinter\__init__.py", line 1712, in _configure
+    self.tk.call(_flatten((self._w, cmd)) + self._options(cnf))
+_tkinter.TclError: image "pyimage2" doesn't exist
+bgerror failed to handle background error.
+    Original error: invalid command name "2826761793600_tick"
+    Error in bgerror: can't invoke "tk" command: application has been destroyed
+
+
+backend terminal
+
+INFO:     Started server process [25200]
+INFO:     Waiting for application startup.
+INFO:app.main:Starting SENTINEL Backend...
+ERROR:    Traceback (most recent call last):
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\uvicorn\server.py", line 78, in serve
+    await self.startup(sockets=sockets)
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\uvicorn\server.py", line 89, in startup
+    await self.lifespan.startup()
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\uvicorn\lifespan\on.py", line 54, in startup
+    await self.startup_event.wait()
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\asyncio\locks.py", line 212, in wait
+    await fut
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\starlette\routing.py", line 677, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\app\main.py", line 61, in lifespan
+    await init_db()
+  File "C:\Users\Piyush\Desktop\sentinel\backend\app\core\database.py", line 104, in init_db
+    async with engine.begin() as conn:
+               ^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 1061, in begin
+    async with conn:
+               ^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\ext\asyncio\base.py", line 125, in __aenter__
+    return await self.start(is_ctxmanager=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 270, in start
+    await greenlet_spawn(self.sync_engine.connect)
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 190, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3268, in connect
+    return self._connection_cls(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\engine\base.py", line 145, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3292, in raw_connection
+    return self.pool.connect()
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 452, in connect
+    return _ConnectionFairy._checkout(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1269, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 716, in checkout
+    rec = pool._do_get()
+          ^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 284, in _do_get
+    return self._create_connection()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 393, in _create_connection
+    return _ConnectionRecord(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 678, in __init__
+    self.__connect()
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 902, in __connect
+    with util.safe_reraise():
+         ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\pool\base.py", line 898, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\engine\create.py", line 637, in connect
+    return dialect.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\engine\default.py", line 616, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 936, in connect
+    await_only(creator_fn(*arg, **kw)),
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 125, in await_only
+    return current.driver.switch(awaitable)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 185, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\asyncpg\connection.py", line 2329, in connect
+    return await connect_utils._connect(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\asyncpg\connect_utils.py", line 991, in _connect
+    conn = await _connect_addr(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\asyncpg\connect_utils.py", line 828, in _connect_addr
+    return await __connect_addr(params, True, *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\asyncpg\connect_utils.py", line 873, in __connect_addr
+    tr, pr = await connector
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\asyncpg\connect_utils.py", line 744, in _create_ssl_connection
+    tr, pr = await loop.create_connection(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1079, in create_connection
+    infos = await self._ensure_resolved(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1455, in _ensure_resolved
+    return await loop.getaddrinfo(host, port, family=family, type=type,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 901, in getaddrinfo
+    return await self.run_in_executor(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+Process SpawnProcess-2:
+Traceback (most recent call last):
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\uvicorn\server.py", line 78, in serve
+    await self.startup(sockets=sockets)
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\uvicorn\server.py", line 89, in startup
+    await self.lifespan.startup()
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\uvicorn\lifespan\on.py", line 54, in startup
+    await self.startup_event.wait()
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\asyncio\locks.py", line 212, in wait
+    await fut
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\multiprocessing\process.py", line 314, in _bootstrap
+    self.run()
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\multiprocessing\process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\uvicorn\_subprocess.py", line 76, in subprocess_started
+    target(sockets=sockets)
+  File "C:\Users\Piyush\Desktop\sentinel\backend\venv\Lib\site-packages\uvicorn\server.py", line 61, in run
+    return asyncio.run(self.serve(sockets=sockets))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\Piyush\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+INFO:     Started server process [1324]
+INFO:     Waiting for application startup.
+INFO:app.main:Starting SENTINEL Backend...
+INFO:app.main:Database initialized successfully
+INFO:     Application startup complete.
+INFO:     127.0.0.1:55143 - "POST /api/v1/auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55199 - "POST /api/v1/sessions/start HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64362 - "POST /api/v1/sessions/start HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53693 - "POST /api/v1/sessions/start HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65047 - "POST /api/v1/sessions/start HTTP/1.1" 200 OK

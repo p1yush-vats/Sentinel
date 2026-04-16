@@ -1,0 +1,241 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+  
+  body {
+    background-color: #020818;
+    color: #e2e8f0;
+    font-family: 'DM Sans', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: #0a1628; }
+  ::-webkit-scrollbar-thumb { background: #162848; border-radius: 2px; }
+  ::-webkit-scrollbar-thumb:hover { background: #22d3ee40; }
+}
+
+@layer components {
+  .card {
+    @apply bg-navy-800 border border-sentinel-border rounded-xl shadow-card;
+  }
+
+  .card-hover {
+    @apply card transition-all duration-300 hover:border-cyan-400/20 hover:shadow-glow-cyan;
+  }
+
+  .btn-primary {
+    @apply bg-cyan-500 hover:bg-cyan-400 text-navy-950 font-semibold px-4 py-2 rounded-lg
+           transition-all duration-200 font-mono text-sm tracking-wide;
+  }
+
+  .btn-ghost {
+    @apply border border-sentinel-border hover:border-cyan-400/40 text-sentinel-muted 
+           hover:text-sentinel-text px-4 py-2 rounded-lg transition-all duration-200 text-sm;
+  }
+
+  .stat-value {
+    @apply font-display font-bold text-sentinel-text;
+  }
+
+  .label {
+    @apply text-xs font-mono text-sentinel-muted uppercase tracking-widest;
+  }
+
+  .badge-critical { @apply bg-red-500/10 text-red-400 border border-red-500/20 px-2 py-0.5 rounded-full text-xs font-mono; }
+  .badge-high     { @apply bg-orange-500/10 text-orange-400 border border-orange-500/20 px-2 py-0.5 rounded-full text-xs font-mono; }
+  .badge-medium   { @apply bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full text-xs font-mono; }
+  .badge-low      { @apply bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full text-xs font-mono; }
+  .badge-ok       { @apply bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-2 py-0.5 rounded-full text-xs font-mono; }
+
+  .glow-line {
+    @apply h-px bg-gradient-to-r from-transparent via-cyan-400/40 to-transparent;
+  }
+
+  .grid-bg {
+    background-image: linear-gradient(rgba(34,211,238,0.03) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(34,211,238,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  .nav-item {
+    @apply flex items-center gap-3 px-4 py-2.5 rounded-lg text-sentinel-muted
+           hover:text-sentinel-text hover:bg-navy-700 transition-all duration-200
+           text-sm font-body cursor-pointer;
+  }
+
+  .nav-item-active {
+    @apply nav-item text-cyan-400 border border-cyan-400/20;
+    background-color: rgba(34, 211, 238, 0.08);
+  }
+
+  .input-field {
+    @apply w-full bg-navy-900 border border-sentinel-border rounded-lg px-4 py-2.5
+           text-sentinel-text placeholder-sentinel-muted font-mono text-sm
+           focus:outline-none focus:border-cyan-400/50 focus:ring-1 focus:ring-cyan-400/20
+           transition-all duration-200;
+  }
+
+  .table-row {
+    @apply border-b border-sentinel-border/50 hover:bg-navy-700/30 transition-colors duration-150;
+  }
+
+  .section-title {
+    @apply font-display font-bold text-lg text-sentinel-text;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out both;
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out both;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes countUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.stagger-1 { animation-delay: 0.05s; }
+.stagger-2 { animation-delay: 0.10s; }
+.stagger-3 { animation-delay: 0.15s; }
+.stagger-4 { animation-delay: 0.20s; }
+.stagger-5 { animation-delay: 0.25s; }
+/* ═══════════════════════════════════════════════════
+   REACT-BITS: SpotlightCard
+   ═══════════════════════════════════════════════════ */
+.spotlight-card {
+  position: relative;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.spotlight-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    600px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+    var(--spotlight-color, rgba(34,211,238,0.10)),
+    transparent 70%
+  );
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+  z-index: 1;
+  border-radius: inherit;
+}
+
+.spotlight-card:hover::before {
+  opacity: 1;
+}
+
+.spotlight-card > * {
+  position: relative;
+  z-index: 2;
+}
+
+/* ═══════════════════════════════════════════════════
+   REACT-BITS: BorderGlow
+   ═══════════════════════════════════════════════════ */
+.border-glow-card {
+  position: relative;
+  border-radius: var(--border-radius, 0.75rem);
+  background: transparent;
+  isolation: isolate;
+}
+
+.border-glow-card::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: calc(var(--border-radius, 0.75rem) + 1px);
+  background: radial-gradient(
+    180px circle at var(--glow-x, 50%) var(--glow-y, 50%),
+    var(--glow-color, #22d3ee),
+    transparent 70%
+  );
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.border-glow-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--border-radius, 0.75rem);
+  background: #0f1f38;
+  z-index: -1;
+}
+
+.border-glow-card:hover::before {
+  opacity: 1;
+}
+
+/* ═══════════════════════════════════════════════════
+   TiltCard — 3D tilt on hover
+   ═══════════════════════════════════════════════════ */
+.tilt-card {
+  transform-style: preserve-3d;
+  transition: transform 0.15s ease;
+  cursor: pointer;
+}
+
+/* ═══════════════════════════════════════════════════
+   Employee detail page extras
+   ═══════════════════════════════════════════════════ */
+.stat-ring {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+
+.shimmer-text {
+  background: linear-gradient(
+    90deg,
+    #22d3ee 0%,
+    #ffffff 40%,
+    #22d3ee 60%,
+    #0ea5e9 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 4s linear infinite;
+}
+
+@keyframes pulse-ring {
+  0%   { transform: scale(0.95); opacity: 0.7; }
+  50%  { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.7; }
+}
+
+.pulse-ring {
+  animation: pulse-ring 2s ease-in-out infinite;
+}

@@ -1,50 +1,82 @@
 """
 Database connection and session management
+
+PGBOUNCER FIX:
+  Supabase uses pgbouncer in transaction pooling mode, which does NOT
+  support prepared statements. asyncpg caches prepared statements by
+  default, causing DuplicatePreparedStatementError on every request
+  after the first.
+
+  Fix: statement_cache_size=0 disables asyncpg's cache. The name func
+  uses UUID4 so names are unique across server restarts — a sequential
+  counter would reset to 0 on hot-reload and collide with pgbouncer's
+  cached names from the previous process.
 """
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import (
+    create_async_engine,
+    AsyncSession,
+    async_sessionmaker,
+)
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool
 from .config import settings
+import uuid
 
-# Create async engine with AGGRESSIVE caching disabled for pgbouncer
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=settings.DEBUG,
-    future=True,
-    poolclass=NullPool,  # Disable connection pooling to avoid conflicts with pgbouncer
-    connect_args={
+
+def _make_engine():
+    """
+    Build the async engine with all pgbouncer-safe settings.
+
+    Key settings:
+      - NullPool                        : no pooling on our side
+      - statement_cache_size=0          : asyncpg — no prepared stmts
+      - prepared_statement_cache_size=0 : asyncpg (redundant but safe)
+      - prepared_statement_name_func    : UUID per statement, unique across
+                                          hot-reloads and parallel workers
+      - jit=off                         : Supabase/pgbouncer stability
+    """
+    connect_args = {
         "statement_cache_size": 0,
         "prepared_statement_cache_size": 0,
+        # UUID4 hex = 32 chars, globally unique, never collides with
+        # pgbouncer's leftover names from a previous server process.
+        "prepared_statement_name_func": lambda: f"__rs_{uuid.uuid4().hex}__",
         "server_settings": {
-            "jit": "off",  # Disable JIT compilation
-            "application_name": "sentinel_backend"
-        }
-    },
-    execution_options={
-        "compiled_cache": None  # Disable SQLAlchemy's compiled query cache
+            "jit": "off",
+            "application_name": "sentinel_backend",
+        },
     }
-)
 
-# Create async session factory
+    return create_async_engine(
+        settings.DATABASE_URL,
+        echo=settings.DEBUG,
+        future=True,
+        poolclass=NullPool,
+        connect_args=connect_args,
+        execution_options={"compiled_cache": None},
+    )
+
+
+engine = _make_engine()
+
 AsyncSessionLocal = async_sessionmaker(
     engine,
     class_=AsyncSession,
     expire_on_commit=False,
     autocommit=False,
-    autoflush=False
+    autoflush=False,
 )
 
-# Base class for models
 Base = declarative_base()
 
 
 async def get_db() -> AsyncSession:
     """
-    Dependency for getting database session
-    
+    FastAPI dependency — yields an async DB session.
+
     Usage:
-        @router.get("/users")
-        async def get_users(db: AsyncSession = Depends(get_db)):
+        @router.get("/")
+        async def endpoint(db: AsyncSession = Depends(get_db)):
             ...
     """
     async with AsyncSessionLocal() as session:
@@ -59,11 +91,11 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db():
-    """Initialize database - create all tables"""
+    """Create all tables (called at startup)."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 
 async def close_db():
-    """Close database connections"""
+    """Dispose engine connections (called at shutdown)."""
     await engine.dispose()

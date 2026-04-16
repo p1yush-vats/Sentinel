@@ -1,29 +1,39 @@
 """
-Sync Client
+Sync Client — DUAL LAYER, CLEAN DESIGN
 
-Handles synchronization between local database and backend API.
+Layer 1 (ALWAYS):   AbnormalityAggregator writes to SQLite on every detection.
+                    No internet needed. Never fails silently.
+
+Layer 2 (INTERVAL): This background thread wakes every SYNC_INTERVAL_SECONDS,
+                    reads all unsynced SQLite records, and pushes them to
+                    Supabase. One HTTP call per session (UPSERT on backend).
+                    If backend is offline → record stays synced=0 → retried
+                    on the next cycle. Nothing is lost.
+
+Key rules enforced here:
+  - NO inline HTTP calls from the aggregator or detection thread.
+  - ONE HTTP call per unsynced abnormality record (which = 1 per session).
+  - Background thread owns its own asyncio event loop (created fresh each cycle).
+  - report_abnormality() is a no-op kept for interface compatibility.
 """
 import httpx
 import asyncio
+import threading
+import time
 from datetime import datetime
 from typing import Optional, Callable, Dict, List
-from pathlib import Path
-import uuid
 
 from storage.local_db import LocalDB
 
 
 class SyncClient:
     """
-    Synchronization client for backend API
-    
-    Features:
-    - Auto-sync on interval
-    - Offline queue management
-    - Retry logic with exponential backoff
-    - Conflict resolution
+    Dual-layer sync client.
+
+    Layer 1 = SQLite (AbnormalityAggregator, instant, offline-safe)
+    Layer 2 = Supabase backend (this class, on interval, with retry)
     """
-    
+
     def __init__(
         self,
         api_base_url: str,
@@ -34,285 +44,384 @@ class SyncClient:
         on_sync_error: Optional[Callable] = None,
         sync_interval_seconds: int = 60
     ):
-        """
-        Initialize sync client
-        
-        Args:
-            api_base_url: Backend API URL
-            access_token: JWT token
-            employee_id: Current employee ID
-            local_db: Local database instance
-            on_sync_complete: Callback when sync completes
-            on_sync_error: Callback on sync errors
-            sync_interval_seconds: Auto-sync interval
-        """
-        self.api_base_url = api_base_url
-        self.access_token = access_token
-        self.employee_id = employee_id
-        self.local_db = local_db
-        self.on_sync_complete = on_sync_complete
-        self.on_sync_error = on_sync_error
+        self.api_base_url          = api_base_url
+        self.access_token          = access_token
+        self.employee_id           = employee_id
+        self.local_db              = local_db
+        self.on_sync_complete      = on_sync_complete
+        self.on_sync_error         = on_sync_error
         self.sync_interval_seconds = sync_interval_seconds
-        
-        # Sync state
-        self.is_syncing = False
+
+        self.is_syncing: bool                   = False
         self.last_sync_time: Optional[datetime] = None
-        self.sync_errors: List[str] = []
-        
-        # Background sync task
-        self.sync_task: Optional[asyncio.Task] = None
-    
+        self.sync_errors: List[str]             = []
+        self.backend_online: bool               = True
+
+        self._flush_thread: Optional[threading.Thread] = None
+        self._flush_running: bool               = False
+
+        # Legacy compat
+        self.sync_task = None
+
+    # ─────────────────────────────────────────────────────────
+    # HELPERS
+    # ─────────────────────────────────────────────────────────
+
     def _get_headers(self) -> Dict[str, str]:
-        """Get HTTP headers"""
         return {
             "Authorization": f"Bearer {self.access_token}",
-            "Content-Type": "application/json"
+            "Content-Type":  "application/json"
         }
-    
-    async def sync_all(self) -> Dict:
+
+    def _mark_backend_online(self):
+        if not self.backend_online:
+            print("  🟢 Backend back online — resuming sync")
+        self.backend_online = True
+
+    def _mark_backend_offline(self, reason: str = ""):
+        if self.backend_online:
+            print(f"  🔴 Backend offline — working locally ({reason})")
+        self.backend_online = False
+
+    # ─────────────────────────────────────────────────────────
+    # BACKGROUND FLUSH (Layer 2)
+    # ─────────────────────────────────────────────────────────
+
+    def start_background_flush(self):
+        """Start the background sync thread. Safe to call multiple times."""
+        if self._flush_running:
+            return
+        self._flush_running = True
+        self._flush_thread = threading.Thread(
+            target=self._flush_loop,
+            daemon=True,
+            name="sentinel-sync-flush"
+        )
+        self._flush_thread.start()
+        print(f"  ✓ Background flush started (every {self.sync_interval_seconds}s)")
+
+    def stop_background_flush(self):
+        """Signal the background thread to stop after its current sleep."""
+        self._flush_running = False
+
+    def _flush_loop(self):
+        """Background thread: sleep → flush → repeat."""
+        while self._flush_running:
+            time.sleep(self.sync_interval_seconds)
+            if not self._flush_running:
+                break
+            try:
+                self._run_flush_cycle()
+            except Exception as e:
+                print(f"  ⚠️ Flush cycle error: {e}")
+                self.sync_errors.append(f"Flush cycle: {e}")
+
+    def _run_flush_cycle(self):
         """
-        Sync all pending data
-        
-        Returns:
-            Sync summary
+        One complete flush cycle.
+        Sessions are pushed first (abnormalities need backend_session_id).
+        Each unsynced abnormality record (one per session) gets one HTTP UPSERT.
         """
-        if self.is_syncing:
-            return {"status": "already_syncing"}
-        
-        self.is_syncing = True
-        summary = {
-            "sessions_synced": 0,
-            "abnormalities_synced": 0,
-            "errors": []
-        }
-        
+        unsynced_sessions      = self.local_db.get_unsynced_sessions()
+        unsynced_abnormalities = self.local_db.get_unsynced_abnormalities()
+
+        if not unsynced_sessions and not unsynced_abnormalities:
+            return
+
+        total = len(unsynced_sessions) + len(unsynced_abnormalities)
+        print(f"\n🔄 Flush cycle: {total} record(s) to sync "
+              f"({len(unsynced_sessions)} sessions, "
+              f"{len(unsynced_abnormalities)} abnormality records)")
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        synced_count = 0
+        failed_count = 0
+
         try:
-            # Sync sessions
-            sessions = self.local_db.get_unsynced_sessions()
-            for session in sessions:
-                success = await self._sync_session(session)
-                if success:
-                    summary["sessions_synced"] += 1
-                else:
-                    summary["errors"].append(f"Failed to sync session {session['id']}")
-            
-            # Sync abnormalities
-            abnormalities = self.local_db.get_unsynced_abnormalities()
-            for abn in abnormalities:
-                success = await self._sync_abnormality(abn)
-                if success:
-                    summary["abnormalities_synced"] += 1
-                else:
-                    summary["errors"].append(f"Failed to sync abnormality {abn['id']}")
-            
-            self.last_sync_time = datetime.now()
-            
-            if self.on_sync_complete:
-                self.on_sync_complete(summary)
-        
-        except Exception as e:
-            summary["errors"].append(str(e))
-            if self.on_sync_error:
-                self.on_sync_error(str(e))
-        
-        finally:
-            self.is_syncing = False
-        
-        return summary
-    
-    async def _sync_session(self, session: Dict) -> bool:
-        """Sync individual session"""
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                # If no backend session ID, create it first
-                if not session.get("backend_session_id"):
-                    response = await client.post(
-                        f"{self.api_base_url}/api/v1/sessions/start",
-                        headers=self._get_headers()
-                    )
-                    
-                    if response.status_code == 200:
-                        data = response.json()
-                        backend_id = data["session"]["id"]
-                        
-                        # Update local database
-                        conn = self.local_db._get_connection()
-                        cursor = conn.cursor()
-                        cursor.execute(
-                            "UPDATE sessions SET backend_session_id = ? WHERE id = ?",
-                            (backend_id, session["id"])
-                        )
-                        conn.commit()
-                        conn.close()
-                        
-                        session["backend_session_id"] = backend_id
-                
-                # Update session data
-                if session.get("backend_session_id"):
-                    # If session is completed, end it
-                    if session.get("status") == "completed":
-                        response = await client.post(
-                            f"{self.api_base_url}/api/v1/sessions/{session['backend_session_id']}/end",
-                            headers=self._get_headers(),
-                            json={
-                                "total_work_minutes": session.get("total_work_minutes", 0),
-                                "total_break_minutes": session.get("total_break_minutes", 0),
-                                "lunch_taken": bool(session.get("lunch_taken")),
-                                "session_quality_score": session.get("session_quality_score")
-                            }
-                        )
-                    else:
-                        # Update active session
-                        response = await client.patch(
-                            f"{self.api_base_url}/api/v1/sessions/{session['backend_session_id']}",
-                            headers=self._get_headers(),
-                            json={
-                                "total_work_minutes": session.get("total_work_minutes", 0),
-                                "total_break_minutes": session.get("total_break_minutes", 0),
-                                "lunch_taken": bool(session.get("lunch_taken")),
-                                "status": session.get("status", "active")
-                            }
-                        )
-                    
-                    if response.status_code == 200:
-                        # Mark as synced
-                        conn = self.local_db._get_connection()
-                        cursor = conn.cursor()
-                        cursor.execute(
-                            "UPDATE sessions SET synced = 1 WHERE id = ?",
-                            (session["id"],)
-                        )
-                        conn.commit()
-                        conn.close()
-                        return True
-            
-            return False
-        
-        except Exception as e:
-            self.sync_errors.append(f"Session sync error: {e}")
-            return False
-    
-    async def _sync_abnormality(self, abnormality: Dict) -> bool:
-        """Sync individual abnormality"""
-        try:
-            # Get backend session ID
-            session = self.local_db.get_session(abnormality["session_id"])
-            if not session or not session.get("backend_session_id"):
-                # Can't sync without backend session
-                return False
-            
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    f"{self.api_base_url}/api/v1/abnormalities",
-                    headers=self._get_headers(),
-                    json={
-                        "session_id": session["backend_session_id"],
-                        "abnormality_type": abnormality["abnormality_type"],
-                        "confidence_score": abnormality["confidence_score"],
-                        "detected_at": abnormality["detected_at"],
-                        "metadata": abnormality.get("metadata", {})
-                    }
-                )
-                
-                if response.status_code == 200:
-                    # Mark as synced
-                    self.local_db.mark_abnormality_synced(abnormality["id"])
-                    return True
-            
-            return False
-        
-        except Exception as e:
-            self.sync_errors.append(f"Abnormality sync error: {e}")
-            return False
-    
-    async def start_auto_sync(self):
-        """Start automatic background syncing"""
-        async def sync_loop():
-            while True:
-                await asyncio.sleep(self.sync_interval_seconds)
+            # 1. Push sessions first
+            for session in unsynced_sessions:
                 try:
-                    await self.sync_all()
+                    success = loop.run_until_complete(
+                        self._push_session_to_backend(session)
+                    )
+                    if success:
+                        synced_count += 1
+                    else:
+                        failed_count += 1
                 except Exception as e:
-                    if self.on_sync_error:
-                        self.on_sync_error(f"Auto-sync error: {e}")
-        
-        self.sync_task = asyncio.create_task(sync_loop())
-    
-    def stop_auto_sync(self):
-        """Stop automatic syncing"""
-        if self.sync_task:
-            self.sync_task.cancel()
-    
-    async def report_abnormality(
+                    failed_count += 1
+                    print(f"  ⚠️ Session flush error: {e}")
+
+            # 2. Push abnormality records (one per session)
+            for abn in unsynced_abnormalities:
+                try:
+                    local_session = self.local_db.get_session(abn["session_id"])
+                    if not local_session or not local_session.get("backend_session_id"):
+                        # Orphaned record — the local session never got a backend ID
+                        # (e.g. created before a bug fix). It can never be synced
+                        # against Supabase because we have no server session to attach
+                        # it to. Mark it done so it doesn't loop forever.
+                        print(f"  ⚠️  Orphaned abnormality for session "
+                              f"{abn['session_id'][:8]}... — no backend session ID. "
+                              f"Marking as skipped.")
+                        self.local_db.mark_abnormality_synced(abn["session_id"])
+                        failed_count += 1
+                        continue
+
+                    backend_session_id = local_session["backend_session_id"]
+
+                    success = loop.run_until_complete(
+                        self._push_abnormality_to_backend(
+                            backend_session_id=backend_session_id,
+                            detections=abn["detections"],
+                            overall_severity=abn["overall_severity"],
+                            confidence_score=abn["confidence_score"],
+                            first_detected_at=abn["first_detected_at"],
+                            last_updated_at=abn["last_updated_at"],
+                        )
+                    )
+
+                    if success:
+                        synced_count += 1
+                        self.local_db.mark_abnormality_synced(abn["session_id"])
+                        print(f"  ✅ Synced abnormality record for session "
+                              f"{abn['session_id'][:8]}... "
+                              f"[{abn['overall_severity']}]")
+                    else:
+                        failed_count += 1
+
+                except Exception as e:
+                    failed_count += 1
+                    print(f"  ⚠️ Abnormality flush error: {e}")
+
+            self.last_sync_time = datetime.now()
+            print(f"  📊 Flush complete: {synced_count} synced, {failed_count} pending")
+
+            if self.on_sync_complete and synced_count > 0:
+                self.on_sync_complete({
+                    "sessions_synced":      len(unsynced_sessions),
+                    "abnormalities_synced": synced_count,
+                    "errors": []
+                })
+
+        finally:
+            loop.close()
+
+    # ─────────────────────────────────────────────────────────
+    # HTTP CALLS
+    # ─────────────────────────────────────────────────────────
+
+    async def _push_abnormality_to_backend(
         self,
-        session_id: str,
-        abnormality_type: str,
+        backend_session_id: str,
+        detections: dict,
+        overall_severity: str,
         confidence_score: float,
-        metadata: Dict
+        first_detected_at: str,
+        last_updated_at: str,
     ) -> bool:
         """
-        Report abnormality immediately
-        
-        Args:
-            session_id: Local session ID
-            abnormality_type: Type of abnormality
-            confidence_score: Confidence (0-1)
-            metadata: Additional data
-        
-        Returns:
-            True if reported successfully
+        Push ONE abnormality record to the backend.
+        The backend route is a UPSERT — finds existing row for session_id,
+        merges, or creates fresh. We send FULL current state.
         """
-        # Save to local DB first
-        abn_id = str(uuid.uuid4())
-        self.local_db.create_abnormality(
-            abnormality_id=abn_id,
-            session_id=session_id,
-            abnormality_type=abnormality_type,
-            confidence_score=confidence_score,
-            detected_at=datetime.now(),
-            metadata=metadata
-        )
-        
-        # Try to sync immediately
-        abnormality = self.local_db.get_session_abnormalities(session_id)
-        if abnormality:
-            return await self._sync_abnormality(abnormality[-1])
-        
-        return False
-    
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                all_ok = True
+
+                for abn_type, details in detections.items():
+                    payload = {
+                        "session_id":       backend_session_id,
+                        "abnormality_type": abn_type,
+                        "confidence_score": float(details.get("confidence", confidence_score)),
+                        "metadata": {
+                            "occurrences": details.get("occurrences", 1),
+                            "severity":    details.get("severity", overall_severity),
+                            "confidence":  details.get("confidence", confidence_score),
+                            "timestamps":  details.get("timestamps", []),
+                            "last_seen":   details.get("last_seen", last_updated_at),
+                        }
+                    }
+
+                    response = await client.post(
+                        f"{self.api_base_url}/api/v1/abnormalities/",
+                        headers=self._get_headers(),
+                        json=payload
+                    )
+
+                    print(f"        📡 HTTP {response.status_code} [{abn_type}]")
+
+                    if response.status_code in (200, 201):
+                        self._mark_backend_online()
+                    else:
+                        self.sync_errors.append(
+                            f"HTTP {response.status_code} for {abn_type}: "
+                            f"{response.text[:100]}"
+                        )
+                        all_ok = False
+
+                return all_ok
+
+        except httpx.ConnectError:
+            self._mark_backend_offline("connection refused")
+            return False
+        except httpx.TimeoutException:
+            self._mark_backend_offline("timeout")
+            return False
+        except Exception as e:
+            self._mark_backend_offline(str(e))
+            self.sync_errors.append(f"Push error: {e}")
+            return False
+
+    async def _push_session_to_backend(self, session: Dict) -> bool:
+        """Push an unsynced session to backend."""
+        try:
+            if session.get("backend_session_id"):
+                return True  # Already has backend ID
+
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    f"{self.api_base_url}/api/v1/sessions/start",
+                    headers=self._get_headers()
+                )
+
+                if response.status_code in (200, 201):
+                    data = response.json()
+                    backend_id = data["session"]["id"]
+                    self.local_db.update_session(
+                        session_id=session["id"],
+                        backend_session_id=backend_id,
+                        synced=True
+                    )
+                    self._mark_backend_online()
+                    return True
+
+            return False
+
+        except Exception as e:
+            self._mark_backend_offline(str(e))
+            return False
+
+    async def _delete_session_from_backend(self, backend_session_id: str) -> bool:
+        """
+        DELETE a session from Supabase via the backend API.
+        Supabase CASCADE wipes abnormalities + work_logs automatically.
+        Used when user chooses 'End & Start New' on conflict.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.delete(
+                    f"{self.api_base_url}/api/v1/sessions/{backend_session_id}",
+                    headers=self._get_headers()
+                )
+                if response.status_code in (200, 404):
+                    # 404 is fine — already gone
+                    print(f"  🗑️ Deleted backend session {backend_session_id[:8]}...")
+                    self._mark_backend_online()
+                    return True
+                else:
+                    print(f"  ⚠️ Failed to delete backend session: HTTP {response.status_code}")
+                    return False
+
+        except httpx.ConnectError:
+            self._mark_backend_offline("connection refused")
+            return False
+        except httpx.TimeoutException:
+            self._mark_backend_offline("timeout")
+            return False
+        except Exception as e:
+            print(f"  ⚠️ Error deleting backend session: {e}")
+            return False
+
+    def delete_session_now(self, backend_session_id: str) -> bool:
+        """
+        Synchronous wrapper for _delete_session_from_backend.
+        Call from main thread (e.g. end_and_start_new in main.py).
+        """
+        try:
+            loop = asyncio.new_event_loop()
+            result = loop.run_until_complete(
+                self._delete_session_from_backend(backend_session_id)
+            )
+            loop.close()
+            return result
+        except Exception as e:
+            print(f"  ⚠️ delete_session_now error: {e}")
+            return False
+
+    # ─────────────────────────────────────────────────────────
+    # FORCED SYNC (called at session end by main.py)
+    # ─────────────────────────────────────────────────────────
+
+    def sync_now(self):
+        """
+        Synchronously run one flush cycle on the calling thread.
+        Called by main.py just before ending a session to guarantee
+        all data is pushed before the app closes.
+        """
+        print("\n🔄 Final sync before closing session...")
+        try:
+            self._run_flush_cycle()
+        except Exception as e:
+            print(f"  ⚠️ Final sync error: {e}")
+
+    async def sync_all(self):
+        """Async version of sync_now (legacy compat)."""
+        unsynced_sessions      = self.local_db.get_unsynced_sessions()
+        unsynced_abnormalities = self.local_db.get_unsynced_abnormalities()
+
+        for session in unsynced_sessions:
+            await self._push_session_to_backend(session)
+
+        for abn in unsynced_abnormalities:
+            local_session = self.local_db.get_session(abn["session_id"])
+            if not local_session or not local_session.get("backend_session_id"):
+                continue
+
+            success = await self._push_abnormality_to_backend(
+                backend_session_id=local_session["backend_session_id"],
+                detections=abn["detections"],
+                overall_severity=abn["overall_severity"],
+                confidence_score=abn["confidence_score"],
+                first_detected_at=abn["first_detected_at"],
+                last_updated_at=abn["last_updated_at"],
+            )
+            if success:
+                self.local_db.mark_abnormality_synced(abn["session_id"])
+
+        self.last_sync_time = datetime.now()
+
+    # ─────────────────────────────────────────────────────────
+    # COMPATIBILITY SHIM
+    # ─────────────────────────────────────────────────────────
+
+    async def report_abnormality(self, *args, **kwargs) -> bool:
+        """
+        NO-OP — kept for interface compatibility only.
+        Abnormalities are written to SQLite by AbnormalityAggregator.
+        Background flush pushes them to Supabase on its interval.
+        """
+        return True
+
+    # ─────────────────────────────────────────────────────────
+    # STATUS
+    # ─────────────────────────────────────────────────────────
+
     def get_sync_status(self) -> Dict:
-        """Get current sync status"""
+        pending_abn  = len(self.local_db.get_unsynced_abnormalities())
+        pending_sess = len(self.local_db.get_unsynced_sessions())
         return {
-            "is_syncing": self.is_syncing,
-            "last_sync_time": self.last_sync_time.isoformat() if self.last_sync_time else None,
-            "pending_sessions": len(self.local_db.get_unsynced_sessions()),
-            "pending_abnormalities": len(self.local_db.get_unsynced_abnormalities()),
-            "errors": self.sync_errors[-10:]  # Last 10 errors
+            "backend_online":        self.backend_online,
+            "is_syncing":            self.is_syncing,
+            "last_sync_time":        self.last_sync_time.isoformat() if self.last_sync_time else None,
+            "pending_sessions":      pending_sess,
+            "pending_abnormalities": pending_abn,
+            "total_pending":         pending_abn + pending_sess,
+            "flush_running":         self._flush_running,
+            "errors":                self.sync_errors[-10:]
         }
 
-
-# Example usage
-if __name__ == "__main__":
-    from pathlib import Path
-    
-    async def test():
-        db = LocalDB(Path.home() / ".sentinel" / "test.db")
-        
-        client = SyncClient(
-            api_base_url="http://127.0.0.1:8000",
-            access_token="test_token",
-            employee_id="test-employee",
-            local_db=db,
-            on_sync_complete=lambda s: print(f"✓ Sync complete: {s}"),
-            on_sync_error=lambda e: print(f"✗ Sync error: {e}")
-        )
-        
-        # Sync all
-        summary = await client.sync_all()
-        print(f"Sync summary: {summary}")
-        
-        # Get status
-        status = client.get_sync_status()
-        print(f"Status: {status}")
-    
-    asyncio.run(test())
+    # Legacy compat
+    def stop_auto_sync(self):
+        self.stop_background_flush()

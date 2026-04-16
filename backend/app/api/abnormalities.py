@@ -1,52 +1,50 @@
-"""
-Abnormalities API Endpoints - PROPERLY FIXED
-Replace backend/api/abnormalities.py with this file
-
-Key fixes:
-1. Store UTC in database (PostgreSQL best practice)
-2. Accept any timezone from clients, convert to UTC before storing
-3. Use timezone_utils consistently
-4. No more double timezone conversions
-"""
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, desc, func
-from pydantic import BaseModel
-from datetime import datetime
-from typing import Optional
 import uuid
+from datetime import datetime, timezone
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from sqlalchemy import select, desc
+from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
 
 from ..core.database import get_db
 from ..core.security import get_current_user_id, RoleChecker
-from ..core.timezone_utils import now_utc, to_utc, to_ist, format_ist
-from ..models.abnormality import Abnormality, AdminAction
+from ..core.websocket import manager
+from ..models.abnormality import Abnormality, AdminAction, SEVERITY_RANK
+from ..models.session import Session
+from ..models.employee import Employee
+from .audit_log import write_audit
+from ..tasks.email_tasks import send_flag_warning, send_flag_escalation
 
 router = APIRouter()
 
 
-# Schemas
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def to_ist(dt: datetime) -> datetime:
+    from datetime import timedelta
+    IST = timezone(timedelta(hours=5, minutes=30))
+    return dt.astimezone(IST)
+
+
 class AbnormalityCreate(BaseModel):
-    """Create abnormality report"""
-    session_id: str
+    session_id:       str
     abnormality_type: str
     confidence_score: float
-    detected_at: datetime
-    metadata: Optional[dict] = None
-
+    metadata:         dict = {}
 
 class AbnormalityReview(BaseModel):
-    """Review abnormality"""
-    review_decision: str  # dismissed, warning_issued, escalated
-    notes: Optional[str] = None
-
+    decision:      str
+    justification: str = ""
 
 class AdminActionCreate(BaseModel):
-    """Create admin action"""
-    employee_id: str
-    session_id: Optional[str] = None
-    action_type: str
+    employee_id:   str
+    session_id:    Optional[str] = None
+    action_type:   str
     justification: str
-    metadata: Optional[dict] = None
+    metadata:      dict = {}
 
 
 @router.post("/")
@@ -55,83 +53,121 @@ async def report_abnormality(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Report a detected abnormality from desktop app
-    Converts any timezone to UTC for storage
-    """
-    # Convert detected_at to UTC for storage
-    detected_at_utc = to_utc(data.detected_at)
-    
-    print(f"📊 Abnormality detected:")
-    print(f"   Type: {data.abnormality_type}")
-    print(f"   Confidence: {data.confidence_score:.2%}")
-    print(f"   Time (UTC): {detected_at_utc}")
-    print(f"   Time (IST): {format_ist(to_ist(detected_at_utc))}")
-    
-    # Create abnormality record with UTC time
-    abnormality = Abnormality(
-        session_id=uuid.UUID(data.session_id),
-        employee_id=uuid.UUID(user_id),
-        abnormality_type=data.abnormality_type,
-        confidence_score=data.confidence_score,
-        detected_at=detected_at_utc,  # Store UTC
-        detection_metadata=data.metadata,
-        reviewed=False
-    )
-    
-    db.add(abnormality)
-    await db.commit()
-    await db.refresh(abnormality)
-    
-    # Update session risk score
-    from ..models.session import Session
-    result = await db.execute(
-        select(Session).where(Session.id == data.session_id)
-    )
-    session = result.scalar_one_or_none()
-    
-    if session:
-        # Calculate new risk score (simple average for now)
-        abn_result = await db.execute(
-            select(func.avg(Abnormality.confidence_score))
-            .where(Abnormality.session_id == data.session_id)
-        )
-        avg_score = abn_result.scalar()
-        session.risk_score = float(avg_score) if avg_score else 0
-        await db.commit()
-    
-    return {
-        "message": "Abnormality reported successfully",
-        "abnormality": abnormality.to_dict()
+    now = now_utc()
+
+    try:
+        session_id = uuid.UUID(data.session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session_id UUID")
+
+    session_result = await db.execute(select(Session).where(Session.id == session_id))
+    session = session_result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {data.session_id} not found")
+
+    employee_id = session.employee_id
+
+    detection_payload = {
+        "occurrences": data.metadata.get("occurrences", 1),
+        "confidence":  round(float(data.confidence_score), 4),
+        "severity":    data.metadata.get("severity", "LOW"),
+        "timestamps":  data.metadata.get("timestamps", []),
+        "last_seen":   now.isoformat(),
     }
+
+    result = await db.execute(select(Abnormality).where(Abnormality.session_id == session_id))
+    record = result.scalar_one_or_none()
+
+    if record:
+        record.merge_detection(data.abnormality_type, detection_payload)
+        record.last_updated_at = now
+
+        # Sync session risk_score (0–100 scale) every time new data merges in
+        new_risk = min(round(float(record.confidence_score) * 100, 2), 100.0)
+        session.risk_score = new_risk
+
+        await db.commit()
+        await db.refresh(record)
+
+        await write_audit(db, "abnormality_detected", "upsert_abnormality",
+            actor_id=str(employee_id), target_id=str(record.id), target_type="abnormality",
+            metadata={"type": data.abnormality_type, "severity": record.overall_severity,
+                      "confidence": float(data.confidence_score), "session_id": data.session_id})
+        await db.commit()
+
+        payload = record.to_dict()
+        await manager.broadcast({"type": "abnormality_detected", "data": payload})
+
+        return {"message": "Abnormality merged into session record", "abnormality": payload}
+
+    else:
+        severity, confidence = Abnormality.recalculate_overall({data.abnormality_type: detection_payload})
+        record = Abnormality(
+            session_id        = session_id,
+            employee_id       = employee_id,
+            overall_severity  = severity,
+            confidence_score  = confidence,
+            detections        = {data.abnormality_type: detection_payload},
+            first_detected_at = now,
+            last_updated_at   = now,
+        )
+        db.add(record)
+        await db.commit()
+        await db.refresh(record)
+
+        # Store on 0–100 scale to match what the desktop sync writes at session end
+        session.risk_score = min(round(confidence * 100, 2), 100.0)
+        await db.commit()
+
+        await write_audit(db, "abnormality_detected", "create_abnormality",
+            actor_id=str(employee_id), target_id=str(record.id), target_type="abnormality",
+            metadata={"type": data.abnormality_type, "severity": severity,
+                      "confidence": float(data.confidence_score), "session_id": data.session_id})
+        await db.commit()
+
+        payload = record.to_dict()
+        await manager.broadcast({"type": "abnormality_detected", "data": payload})
+
+        return {"message": "Abnormality record created", "abnormality": payload}
 
 
 @router.get("/")
 async def get_abnormalities(
-    user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
-    limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    user_id:    str = Depends(get_current_user_id),
+    db:         AsyncSession = Depends(get_db),
+    limit:      int = Query(50, ge=1, le=100),
+    offset:     int = Query(0, ge=0),
     session_id: Optional[str] = None,
-    reviewed: Optional[bool] = None
+    reviewed:   Optional[bool] = None
 ):
-    """Get abnormalities for current user"""
     query = select(Abnormality).where(Abnormality.employee_id == user_id)
-    
     if session_id:
         query = query.where(Abnormality.session_id == session_id)
     if reviewed is not None:
         query = query.where(Abnormality.reviewed == reviewed)
-    
-    query = query.order_by(desc(Abnormality.detected_at)).limit(limit).offset(offset)
-    
+    query = query.order_by(desc(Abnormality.last_updated_at)).limit(limit).offset(offset)
     result = await db.execute(query)
-    abnormalities = result.scalars().all()
-    
-    return {
-        "abnormalities": [a.to_dict() for a in abnormalities],
-        "total": len(abnormalities)
-    }
+    records = result.scalars().all()
+    return {"abnormalities": [r.to_dict() for r in records], "total": len(records)}
+
+
+@router.get("/all/unreviewed", dependencies=[Depends(RoleChecker(["admin"]))])
+async def get_unreviewed_abnormalities(
+    db:             AsyncSession = Depends(get_db),
+    limit:          int   = Query(100, ge=1, le=500),
+    offset:         int   = Query(0, ge=0),
+    min_confidence: Optional[float] = Query(None, ge=0, le=1),
+    employee_id:    Optional[str] = None
+):
+    query = select(Abnormality).where(Abnormality.reviewed == False)
+    if min_confidence is not None:
+        query = query.where(Abnormality.confidence_score >= min_confidence)
+    if employee_id:
+        query = query.where(Abnormality.employee_id == employee_id)
+    query = query.order_by(desc(Abnormality.overall_severity), desc(Abnormality.last_updated_at)).limit(limit).offset(offset)
+    result = await db.execute(query)
+    records = result.scalars().all()
+    return {"abnormalities": [r.to_dict() for r in records], "total": len(records)}
 
 
 @router.get("/{abnormality_id}")
@@ -140,246 +176,98 @@ async def get_abnormality(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get abnormality details"""
-    result = await db.execute(
-        select(Abnormality).where(
-            and_(
-                Abnormality.id == abnormality_id,
-                Abnormality.employee_id == user_id
-            )
-        )
-    )
-    abnormality = result.scalar_one_or_none()
-    
-    if not abnormality:
-        raise HTTPException(
-            status_code=404,
-            detail="Abnormality not found"
-        )
-    
-    return abnormality.to_dict()
-
-
-# Admin endpoints
-@router.get("/all/unreviewed", dependencies=[Depends(RoleChecker(["admin"]))])
-async def get_unreviewed_abnormalities(
-    db: AsyncSession = Depends(get_db),
-    limit: int = Query(100, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-    min_confidence: Optional[float] = Query(None, ge=0, le=100)
-):
-    """Get all unreviewed abnormalities (Admin only)"""
-    query = select(Abnormality).where(Abnormality.reviewed == False)
-    
-    if min_confidence:
-        query = query.where(Abnormality.confidence_score >= min_confidence)
-    
-    query = query.order_by(desc(Abnormality.confidence_score), desc(Abnormality.detected_at))
-    query = query.limit(limit).offset(offset)
-    
-    result = await db.execute(query)
-    abnormalities = result.scalars().all()
-    
-    return {
-        "abnormalities": [a.to_dict() for a in abnormalities],
-        "total": len(abnormalities)
-    }
+    result = await db.execute(select(Abnormality).where(Abnormality.id == abnormality_id))
+    record = result.scalar_one_or_none()
+    if not record:
+        raise HTTPException(status_code=404, detail="Abnormality not found")
+    return record.to_dict()
 
 
 @router.post("/{abnormality_id}/review", dependencies=[Depends(RoleChecker(["admin"]))])
 async def review_abnormality(
     abnormality_id: str,
-    review_data: AbnormalityReview,
-    admin_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
+    review_data:    AbnormalityReview,
+    background_tasks: BackgroundTasks,
+    admin_id:       str = Depends(get_current_user_id),
+    db:             AsyncSession = Depends(get_db)
 ):
-    """
-    Review an abnormality (Admin only)
-    Stores review timestamp in UTC
-    """
-    # Get abnormality
-    result = await db.execute(
-        select(Abnormality).where(Abnormality.id == abnormality_id)
-    )
-    abnormality = result.scalar_one_or_none()
-    
-    if not abnormality:
-        raise HTTPException(
-            status_code=404,
-            detail="Abnormality not found"
-        )
-    
-    # Update review status with UTC time
-    current_utc = now_utc()
-    current_ist = to_ist(current_utc)
-    
-    print(f"👨‍💼 Admin review:")
-    print(f"   Admin ID: {admin_id}")
-    print(f"   Decision: {review_data.review_decision}")
-    print(f"   Time (UTC): {current_utc}")
-    print(f"   Time (IST): {format_ist(current_ist)}")
-    
-    abnormality.reviewed = True
-    abnormality.reviewed_by = uuid.UUID(admin_id)
-    abnormality.reviewed_at = current_utc  # Store UTC
-    abnormality.review_decision = review_data.review_decision
-    
-    # Create admin action if warning issued or escalated
-    if review_data.review_decision in ['warning_issued', 'escalated']:
-        admin_action = AdminAction(
-            admin_id=uuid.UUID(admin_id),
-            employee_id=abnormality.employee_id,
-            session_id=abnormality.session_id,
-            action_type=review_data.review_decision,
-            justification=review_data.notes or f"Abnormality reviewed: {abnormality.abnormality_type}",
-            action_metadata={
-                "abnormality_id": str(abnormality.id),
-                "abnormality_type": abnormality.abnormality_type,
-                "confidence_score": float(abnormality.confidence_score)
-            }
-        )
-        db.add(admin_action)
-    
+    result = await db.execute(select(Abnormality).where(Abnormality.id == abnormality_id))
+    record = result.scalar_one_or_none()
+    if not record:
+        raise HTTPException(status_code=404, detail="Abnormality not found")
+
+    record.reviewed        = True
+    record.reviewed_by     = uuid.UUID(admin_id)
+    record.reviewed_at     = now_utc()
+    record.review_decision = review_data.decision
+
     await db.commit()
-    await db.refresh(abnormality)
-    
-    return {
-        "message": "Abnormality reviewed successfully",
-        "abnormality": abnormality.to_dict(),
-        "reviewed_at_utc": current_utc.isoformat(),
-        "reviewed_at_ist": current_ist.isoformat()
-    }
+    await db.refresh(record)
+
+    await write_audit(db, "flag_reviewed", f"review_{review_data.decision}",
+        actor_id=admin_id, target_id=str(record.employee_id), target_type="abnormality",
+        metadata={"abnormality_id": abnormality_id, "decision": review_data.decision,
+                  "session_id": str(record.session_id), "severity": record.overall_severity})
+    await db.commit()
+
+    employee = await db.scalar(select(Employee).where(Employee.id == record.employee_id))
+    if employee:
+        note = review_data.justification if review_data.justification else f"Your activity on session {record.session_id} was reviewed."
+        if review_data.decision in ("warn", "warned"):
+            background_tasks.add_task(send_flag_warning, employee.email, employee.full_name, note)
+        elif review_data.decision in ("escalate", "escalated"):
+            background_tasks.add_task(send_flag_escalation, employee.email, employee.full_name, note)
+
+    return {"message": "Review saved", "abnormality": record.to_dict()}
 
 
-@router.get("/stats/summary", dependencies=[Depends(RoleChecker(["admin"]))])
-async def get_abnormality_stats(
-    db: AsyncSession = Depends(get_db),
-    start_date: Optional[datetime] = None,
-    end_date: Optional[datetime] = None
-):
-    """
-    Get abnormality statistics (Admin only)
-    Accepts dates in any timezone, converts to UTC for querying
-    """
-    query = select(Abnormality)
-    
-    # Convert date filters to UTC
-    if start_date:
-        start_date_utc = to_utc(start_date)
-        query = query.where(Abnormality.detected_at >= start_date_utc)
-        print(f"📅 Start date filter: {format_ist(to_ist(start_date_utc))}")
-    
-    if end_date:
-        end_date_utc = to_utc(end_date)
-        query = query.where(Abnormality.detected_at <= end_date_utc)
-        print(f"📅 End date filter: {format_ist(to_ist(end_date_utc))}")
-    
-    result = await db.execute(query)
-    all_abnormalities = result.scalars().all()
-    
-    # Calculate statistics
-    total = len(all_abnormalities)
-    reviewed = len([a for a in all_abnormalities if a.reviewed])
-    unreviewed = total - reviewed
-    
-    by_type = {}
-    for abn in all_abnormalities:
-        by_type[abn.abnormality_type] = by_type.get(abn.abnormality_type, 0) + 1
-    
-    avg_confidence = sum(float(a.confidence_score) for a in all_abnormalities) / total if total > 0 else 0
-    
-    return {
-        "total_abnormalities": total,
-        "reviewed": reviewed,
-        "unreviewed": unreviewed,
-        "by_type": by_type,
-        "average_confidence_score": round(avg_confidence, 2),
-        "period": {
-            "start_date": start_date.isoformat() if start_date else None,
-            "end_date": end_date.isoformat() if end_date else None
-        }
-    }
-
-
-# Admin Actions endpoints
 @router.post("/admin-actions", dependencies=[Depends(RoleChecker(["admin"]))])
 async def create_admin_action(
     action_data: AdminActionCreate,
-    admin_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
+    admin_id:    str = Depends(get_current_user_id),
+    db:          AsyncSession = Depends(get_db)
 ):
-    """
-    Create an admin action (Admin only)
-    Timestamp stored in UTC
-    """
-    current_utc = now_utc()
-    
-    print(f"⚖️ Admin action created:")
-    print(f"   Type: {action_data.action_type}")
-    print(f"   Employee: {action_data.employee_id}")
-    print(f"   Time (UTC): {current_utc}")
-    
     admin_action = AdminAction(
-        admin_id=uuid.UUID(admin_id),
-        employee_id=uuid.UUID(action_data.employee_id),
-        session_id=uuid.UUID(action_data.session_id) if action_data.session_id else None,
-        action_type=action_data.action_type,
-        justification=action_data.justification,
-        action_metadata=action_data.metadata
-        # created_at will be set by server_default to current UTC
+        admin_id        = uuid.UUID(admin_id),
+        employee_id     = uuid.UUID(action_data.employee_id),
+        session_id      = uuid.UUID(action_data.session_id) if action_data.session_id else None,
+        action_type     = action_data.action_type,
+        justification   = action_data.justification,
+        action_metadata = action_data.metadata
     )
-    
     db.add(admin_action)
     await db.commit()
     await db.refresh(admin_action)
-    
-    return {
-        "message": "Admin action created successfully",
-        "action": admin_action.to_dict(),
-        "created_at_utc": current_utc.isoformat(),
-        "created_at_ist": to_ist(current_utc).isoformat()
-    }
+
+    await write_audit(db, "admin_action", action_data.action_type,
+        actor_id=admin_id, target_id=action_data.employee_id, target_type="employee",
+        metadata={"action_type": action_data.action_type, "session_id": action_data.session_id,
+                  "justification": action_data.justification[:100]})
+    await db.commit()
+
+    return {"message": "Admin action recorded", "action": admin_action.to_dict()}
 
 
 @router.get("/admin-actions", dependencies=[Depends(RoleChecker(["admin"]))])
 async def get_admin_actions(
-    db: AsyncSession = Depends(get_db),
-    limit: int = Query(100, ge=1, le=500),
-    offset: int = Query(0, ge=0),
+    db:          AsyncSession = Depends(get_db),
+    limit:       int = Query(100, ge=1, le=500),
+    offset:      int = Query(0, ge=0),
     employee_id: Optional[str] = None,
     action_type: Optional[str] = None
 ):
-    """Get admin actions (Admin only)"""
     query = select(AdminAction)
-    
     if employee_id:
         query = query.where(AdminAction.employee_id == employee_id)
     if action_type:
         query = query.where(AdminAction.action_type == action_type)
-    
     query = query.order_by(desc(AdminAction.created_at)).limit(limit).offset(offset)
-    
     result = await db.execute(query)
     actions = result.scalars().all()
-    
-    return {
-        "actions": [a.to_dict() for a in actions],
-        "total": len(actions)
-    }
+    return {"actions": [a.to_dict() for a in actions], "total": len(actions)}
 
 
 @router.get("/debug/time")
 async def debug_time():
-    """Debug endpoint to check current time in abnormalities context"""
-    utc_now = now_utc()
-    ist_now = to_ist(utc_now)
-    
-    return {
-        "utc_time": utc_now.isoformat(),
-        "ist_time": ist_now.isoformat(),
-        "ist_formatted": format_ist(ist_now),
-        "timezone_utc": str(utc_now.tzinfo),
-        "timezone_ist": str(ist_now.tzinfo),
-        "timestamp": utc_now.timestamp(),
-        "message": "All times stored in database are in UTC"
-    }
+    utc = now_utc()
+    return {"utc_time": utc.isoformat(), "ist_time": to_ist(utc).isoformat()}
