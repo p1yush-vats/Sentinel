@@ -3,6 +3,10 @@
   "trailingSlash": false,
   "rewrites": [
     {
+      "source": "/my/(.*)",
+      "destination": "/dashboard/index.html"
+    },
+    {
       "source": "/(.*)",
       "destination": "/dashboard/index.html"
     }
