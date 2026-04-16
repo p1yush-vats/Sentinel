@@ -118,17 +118,27 @@ class SentinelApp:
                 pystray.MenuItem("Exit Sentinel", self._on_tray_exit)
             )
             self.tray_icon = pystray.Icon("Sentinel", image, "Sentinel", menu)
+            # Add a dedicated click handler for double-click/default action
+            self.tray_icon.on_activate = self._on_tray_show
             threading.Thread(target=self.tray_icon.run, daemon=True).start()
         except Exception as e:
             print(f"Tray error: {e}")
 
-    def _on_tray_show(self, icon, item):
+    def _on_tray_show(self, icon=None, item=None):
+        print("Tray: Showing Sentinel...")
+        def _show():
+            target = self.main_window or self.login_window
+            if target:
+                target.deiconify()
+                target.focus_force()
+                target.state('normal')
+                target.lift()
+        
+        # Try both direct and after() for maximum responsiveness across threads
         if self.main_window:
-            self.main_window.after(0, self.main_window.deiconify)
-            self.main_window.after(0, self.main_window.lift)
+            self.main_window.after(0, _show)
         elif self.login_window:
-            self.login_window.after(0, self.login_window.deiconify)
-            self.login_window.after(0, self.login_window.lift)
+            self.login_window.after(0, _show)
 
     def _on_tray_exit(self, icon, item):
         import os
