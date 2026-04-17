@@ -141,5 +141,10 @@ async def send_flag_escalation(employee_email: str, employee_name: str, note: st
     html = _get_base_template("Formal Incident Escalation", content, color="#dc2626")
 
     await asyncio.to_thread(_send_email_sync, employee_email, subject, html)
-    if hr_email and hr_email != employee_email:
-        await asyncio.to_thread(_send_email_sync, hr_email, subject, html)
+    
+    if hr_email:
+        # Support multiple HR emails separated by commas
+        hr_list = [e.strip() for e in hr_email.split(",") if e.strip()]
+        for hr in hr_list:
+            if hr != employee_email:
+                await asyncio.to_thread(_send_email_sync, hr, subject, html)
