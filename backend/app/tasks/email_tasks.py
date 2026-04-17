@@ -1,7 +1,10 @@
 import asyncio
 import smtplib
+import logging
 from email.message import EmailMessage
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 def _get_base_template(title: str, content: str, color: str = "#0f172a") -> str:
     """Provides a highly formal, corporate HTML email shell."""
@@ -47,7 +50,7 @@ def _get_base_template(title: str, content: str, color: str = "#0f172a") -> str:
 def _send_email_sync(to_email: str, subject: str, html_body: str):
     """Synchronous core wrapped by asyncio.to_thread"""
     if not settings.SMTP_HOST or not settings.SMTP_USER:
-        print(f"[MAILER WARNING] SMTP not configured in .env. Skipping email to {to_email}.")
+        logger.warning(f"SMTP not configured — skipping email to {to_email}")
         return
 
     msg = EmailMessage()
@@ -61,9 +64,9 @@ def _send_email_sync(to_email: str, subject: str, html_body: str):
             server.starttls()
             server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
             server.send_message(msg)
-            print(f"[MAILER SUCCESS] Official email dispatched to {to_email} (Subject: '{subject}')")
+            logger.info(f"Email dispatched to {to_email} — subject: '{subject}'")
     except Exception as e:
-        print(f"[MAILER ERROR] Failed to send email to {to_email}. Error: {str(e)}")
+        logger.error(f"Failed to send email to {to_email}: {e}")
 
 
 async def send_task_assignment(employee_email: str, employee_name: str, task_title: str, priority: str):
@@ -125,9 +128,7 @@ async def send_flag_escalation(employee_email: str, employee_name: str, note: st
         <p>A senior Human Resources representative will contact you shortly to schedule a formal review of this incident.</p>
     """
     html = _get_base_template("Formal Incident Escalation", content, color="#dc2626")
-    
-    # Send to Employee
+
     await asyncio.to_thread(_send_email_sync, employee_email, subject, html)
-    # Send to HR (if different)
     if hr_email and hr_email != employee_email:
-        await asyncio.to_thread(_send_email_sync, hr_email, subject, html)
+        await asyncio.to_thread(_send_email_sync, hr_email, subject, html)

@@ -9,40 +9,37 @@ export default function useWebSocket(url) {
   const connect = () => {
     try {
       ws.current = new WebSocket(url);
-      
+
       ws.current.onopen = () => {
         setIsConnected(true);
-        console.log('WebSocket Connected');
       };
-      
+
       ws.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
           setLastMessage(data);
         } catch (e) {
-          console.error("Failed to parse websocket message", e);
+          // Silently drop malformed messages
         }
       };
-      
+
       ws.current.onclose = () => {
         setIsConnected(false);
-        console.log('WebSocket Disconnected. Reconnecting in 3s...');
-        // Auto-reconnect
+        // Auto-reconnect after 3 seconds
         reconnectTimeout.current = setTimeout(connect, 3000);
       };
-      
-      ws.current.onerror = (err) => {
-        console.error('WebSocket Error:', err);
+
+      ws.current.onerror = () => {
         ws.current?.close();
       };
     } catch (err) {
-      console.error('Failed to create WebSocket:', err);
+      // Connection failed — reconnect will retry
     }
   };
 
   useEffect(() => {
     connect();
-    
+
     return () => {
       clearTimeout(reconnectTimeout.current);
       if (ws.current) {

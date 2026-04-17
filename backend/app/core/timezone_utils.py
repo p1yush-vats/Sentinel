@@ -1,11 +1,7 @@
 """
-Timezone Utilities - FIXED VERSION
-Use this to replace backend/core/timezone_utils.py
-
-Key changes:
-1. Use pytz exclusively (more reliable)
-2. Store UTC in database, convert to IST only for display
-3. Clear conversion functions
+Timezone Utilities
+All datetimes are stored as UTC in the database and converted to IST only for display.
+Uses pytz for reliable cross-platform timezone handling.
 """
 from datetime import datetime
 from typing import Optional
@@ -47,7 +43,7 @@ def to_utc(dt: datetime) -> datetime:
         datetime: Datetime in UTC timezone
     """
     if dt.tzinfo is None:
-        # If naive, assume it's IST
+        # Naive datetimes are assumed to be IST
         dt = IST.localize(dt)
     
     return dt.astimezone(UTC)
@@ -64,7 +60,7 @@ def to_ist(dt: datetime) -> datetime:
         datetime: Datetime in IST timezone
     """
     if dt.tzinfo is None:
-        # If naive, assume it's UTC (from database)
+        # Naive datetimes coming from the DB are assumed to be UTC
         dt = UTC.localize(dt)
     
     return dt.astimezone(IST)
@@ -80,7 +76,6 @@ def parse_ist_string(dt_string: str) -> datetime:
     Returns:
         datetime: Parsed datetime in IST
     """
-    # Handle various formats
     if dt_string.endswith('Z'):
         dt_string = dt_string[:-1] + '+00:00'
     

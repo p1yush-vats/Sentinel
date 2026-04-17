@@ -1,7 +1,4 @@
-"""
-main.py — SENTINEL Desktop App
-Entry point. Wires SentinelApp into UI.
-"""
+import logging
 import sys
 import asyncio
 from pathlib import Path
@@ -15,6 +12,14 @@ import httpx
 import ctypes
 import pystray
 from PIL import Image
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger("sentinel")
 
 try:
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("sentinel.desktop.app.1.0")
@@ -122,10 +127,10 @@ class SentinelApp:
             self.tray_icon.on_activate = self._on_tray_show
             threading.Thread(target=self.tray_icon.run, daemon=True).start()
         except Exception as e:
-            print(f"Tray error: {e}")
+            logger.error(f"Tray error: {e}")
 
     def _on_tray_show(self, icon=None, item=None):
-        print("Tray: Showing Sentinel...")
+        logger.info("Tray: Showing Sentinel...")
         def _show():
             target = self.main_window or self.login_window
             if target:
@@ -142,25 +147,25 @@ class SentinelApp:
 
     def _on_tray_exit(self, icon=None, item=None):
         import os
-        print("Tray exit: terminating Sentinel...")
+        logger.info("Tray exit: terminating Sentinel...")
         # Don't call self.tray_icon.stop() — it blocks inside the tray thread
         # causing a deadlock before os._exit() can fire.
         os._exit(0)
 
     # ─────────────────────────────────────────────────────────
     def run(self):
-        print("=" * 50)
-        print("  SENTINEL Desktop App v1.0.0")
-        print(f"  API: {Config.API_BASE_URL}")
-        print(f"  DB : {Config.DB_PATH}")
-        print("=" * 50)
+        logger.info("=" * 50)
+        logger.info("  SENTINEL Desktop App v1.0.0")
+        logger.info(f"  API: {Config.API_BASE_URL}")
+        logger.info(f"  DB : {Config.DB_PATH}")
+        logger.info("=" * 50)
 
         if self.jwt_handler.has_saved_tokens() and self.jwt_handler.is_token_valid():
             self.user         = self.jwt_handler.get_user_data()
             self.access_token = self.jwt_handler.get_access_token()
             if self.user and self.access_token and "id" in self.user:
                 try:
-                    print(f"Auto-login: {self.user.get('full_name')} ({self.user.get('role')})")
+                    logger.info(f"Auto-login: {self.user.get('full_name')} ({self.user.get('role')})")
                     self._init_components()
                     self._setup_tray()
                     incomplete = self._check_incomplete_session()
@@ -170,7 +175,7 @@ class SentinelApp:
                         self._show_main()
                     return
                 except Exception as e:
-                    print(f"Auto-login error: {e}")
+                    logger.error(f"Auto-login error: {e}")
                     import traceback; traceback.print_exc()
                     self.jwt_handler.clear_tokens()
             else:
@@ -188,13 +193,13 @@ class SentinelApp:
             start = parse_datetime_ist(session["start_time"])
             age   = now_ist() - start
             if age < timedelta(hours=Config.SESSION_RECOVERY_WINDOW_HOURS):
-                print(f"Found incomplete session from {int(age.total_seconds()//60)} min ago")
+                logger.info(f"Found incomplete session from {int(age.total_seconds()//60)} min ago")
                 return session
             self.local_db.update_session(session_id=session["id"],
                                           status="abandoned", end_time=now_ist())
             return None
         except Exception as e:
-            print(f"Error checking incomplete session: {e}")
+            logger.error(f"Error checking incomplete session: {e}")
             return None
 
     def _session_recovery_dialog(self, session: dict):
@@ -304,7 +309,7 @@ class SentinelApp:
         self._show_main()
 
     def _logout(self):
-        print("Logging out…")
+        logger.info("Logging out…")
         self._stop_detection()
         if self.sync_client:
             self.sync_client.stop_background_flush()
@@ -334,7 +339,7 @@ class SentinelApp:
                 pass
 
     def _init_components(self):
-        print("Initializing components…")
+        logger.info("Initializing components…")
         self.session_manager = SessionManager(
             api_base_url=Config.API_BASE_URL,
             access_token=self.access_token,
@@ -360,7 +365,7 @@ class SentinelApp:
             on_abnormality_detected=self._on_abnormality_detected,
             confidence_threshold=Config.ABNORMALITY_CONFIDENCE_THRESHOLD
         )
-        print("Components ready.")
+        logger.info("Components ready.")
 
     def _on_alert_received(self, data: dict):
         if self.main_window:
@@ -478,7 +483,7 @@ class SentinelApp:
                 self._start_detection()
 
             except Exception as e:
-                print(f"Session start error: {e}")
+                logger.error(f"Session start error: {e}")
                 import traceback; traceback.print_exc()
 
         threading.Thread(target=_run, daemon=True).start()
@@ -496,13 +501,13 @@ class SentinelApp:
             self.abnormality_aggregator.flush()
             summary = self.abnormality_aggregator.get_summary()
             if summary:
-                print(f"Abnormality summary: {len(summary)} type(s)")
+                logger.info(f"Abnormality summary: {len(summary)} type(s)")
             self.abnormality_aggregator = None
 
         try:
             self.sync_client.sync_now()
         except Exception as e:
-            print(f"Final sync error: {e}")
+            logger.error(f"Final sync error: {e}")
 
         def _run():
             try:
@@ -534,7 +539,7 @@ class SentinelApp:
                 self.sync_client.stop_background_flush()
 
             except Exception as e:
-                print(f"Session end error: {e}")
+                logger.error(f"Session end error: {e}")
                 import traceback; traceback.print_exc()
 
         threading.Thread(target=_run, daemon=True).start()
@@ -551,7 +556,7 @@ class SentinelApp:
             self._break_segment_start = now_ist()
             self._stop_detection()
         except Exception as e:
-            print(f"Break error: {e}")
+            logger.error(f"Break error: {e}")
 
     def _end_break(self):
         try:
@@ -563,7 +568,7 @@ class SentinelApp:
             self._work_segment_start = now_ist()
             self._start_detection()
         except Exception as e:
-            print(f"End break error: {e}")
+            logger.error(f"End break error: {e}")
 
     def _take_lunch(self):
         try:
@@ -574,7 +579,7 @@ class SentinelApp:
             self._lunch_segment_start = now_ist()
             self._stop_detection()
         except Exception as e:
-            print(f"Lunch error: {e}")
+            logger.error(f"Lunch error: {e}")
 
     def _end_lunch(self):
         try:
@@ -585,7 +590,7 @@ class SentinelApp:
             self._work_segment_start = now_ist()
             self._start_detection()
         except Exception as e:
-            print(f"End lunch error: {e}")
+            logger.error(f"End lunch error: {e}")
 
     # ─────────────────────────────────────────────────────────
     # DETECTION
@@ -598,14 +603,14 @@ class SentinelApp:
         self.detection_task = threading.Thread(
             target=self._detection_loop, daemon=True)
         self.detection_task.start()
-        print("Detection pipeline started")
+        logger.info("Detection pipeline started")
 
     def _stop_detection(self):
         if not self.detection_running:
             return
         self.detection_running = False
         self.input_collector.stop_collecting()
-        print("Detection pipeline stopped")
+        logger.info("Detection pipeline stopped")
 
     def _detection_loop(self):
         interval = 30
@@ -659,16 +664,16 @@ class SentinelApp:
                                 self.main_window.after(0, lambda ts=t:
                                     self.main_window.set_sync_status(True, ts))
                         except Exception as e:
-                            print(f"Session sync error: {e}")
+                            logger.error(f"Session sync error: {e}")
                     threading.Thread(target=_sync, daemon=True).start()
 
             except Exception as e:
-                print(f"Detection loop error: {e}")
+                logger.error(f"Detection loop error: {e}")
                 import traceback; traceback.print_exc()
 
             time.sleep(interval)
 
-        print("Detection loop stopped")
+        logger.info("Detection loop stopped")
 
     # ─────────────────────────────────────────────────────────
     # CALLBACKS
@@ -680,13 +685,13 @@ class SentinelApp:
 
     def _on_sync_complete(self, summary: dict):
         n = summary.get("sessions_synced", 0) + summary.get("abnormalities_synced", 0)
-        print(f"Sync complete — {n} record(s)")
+        logger.info(f"Sync complete — {n} record(s)")
         if self.main_window:
             ts = now_ist().strftime("%I:%M %p")
             self.main_window.after(0, lambda t=ts: self.main_window.set_sync_status(True, t))
 
     def _on_sync_error(self, error: str):
-        print(f"Sync error: {error}")
+        logger.error(f"Sync error: {error}")
         if self.main_window:
             ts = now_ist().strftime("%I:%M %p")
             self.main_window.after(0, lambda t=ts: self.main_window.set_sync_status(False, t))
@@ -777,9 +782,9 @@ class SentinelApp:
                     log_type=log_type, start_time=start, end_time=end,
                     duration_minutes=duration, break_token_used=break_token_used))
                 loop.close()
-                print(f"Work log saved: {log_type} ({duration} min)")
+                logger.info(f"Work log saved: {log_type} ({duration} min)")
             except Exception as e:
-                print(f"Work log error: {e}")
+                logger.error(f"Work log error: {e}")
         threading.Thread(target=_send, daemon=True).start()
 
     def _accumulate_hourly(self, activity: dict):

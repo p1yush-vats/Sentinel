@@ -152,6 +152,4 @@ class Pagination:
     DEFAULT_LIMIT = 50
     MAX_LIMIT = 500
     DEFAULT_OFFSET = 0
-
-
-# TODO: Add more constants as features are implemented
+

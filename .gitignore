@@ -1,14 +1,90 @@
-# virtual environments
-venv/
-backend/venv/
-desktop-app/venv/
-# environment variables
-desktop-app/dist/
-dashboard/node_modules
-# python cache
-__pycache__/
-*.pyc
+# ==============================================================================
+# SENTINEL PROJECT GITIGNORE
+# ==============================================================================
 
-# editor noise
+# ── Environment & Secrets ─────────────────────────────────────────────────────
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+!.env.example
+
+# ── Python Junk ───────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/ (Wait, user wants to keep the root SENTINEL-Setup.exe, but desktop-app/dist/ is usually junk)
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+venv/
+ENV/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.nox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+pytest_debug.log
+
+# ── Node.js / Frontend ───────────────────────────────────────────────────────
+node_modules/
+jspm_packages/
+.npm
+.eslintcache
+.stylelintcache
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+.node_repl_history
+*.tgz
+package-lock.json (Keep if you want deterministic installs, delete if not)
+.next
+out/
+.docusaurus
+.cache/
+
+# ── Databases ────────────────────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── OS / Editor Junk ─────────────────────────────────────────────────────────
 .vscode/
 .idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Project Specific Assets ──────────────────────────────────────────────────
+# The user wants to KEEP these specific large files:
+!SENTINEL-Setup.exe
+!SENTINEL_Major_Project_Report_Piyush_Vats.docx
+
+# But ignore local development databases
+desktop-app/sentinel.db
+backend/app.db

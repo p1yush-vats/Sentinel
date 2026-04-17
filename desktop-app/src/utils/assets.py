@@ -1,14 +1,4 @@
-"""
-desktop-app/src/utils/assets.py
-
-Central helper for loading SENTINEL image assets.
-UPDATED: Handles PyInstaller frozen exe (_MEIPASS) path correctly.
-
-Usage:
-    from utils.assets import set_window_icon, get_logo_32, get_logo_64
-    set_window_icon(my_window)
-    label = ctk.CTkLabel(parent, image=get_logo_32(), text="")
-"""
+import logging
 from pathlib import Path
 from typing import Optional
 import sys
@@ -17,8 +7,10 @@ import customtkinter as ctk
 from PIL import Image
 from dotenv import load_dotenv
 
+logger = logging.getLogger(__name__)
 
-# ── App root detection ────────────────────────────────────────────────────────
+
+# App root detection
 # Priority order:
 #   1. PyInstaller frozen  → sys._MEIPASS  (bundled data temp dir)
 #   2. Nuitka compiled     → exe parent dir
@@ -45,14 +37,14 @@ def get_exe_dir() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
-# ── Load .env ─────────────────────────────────────────────────────────────────
+# Load .env
 # Try next to exe first, then fallback to project root
 _env_path = get_exe_dir() / ".env"
 if not _env_path.exists():
     _env_path = get_app_root() / ".env"
 load_dotenv(dotenv_path=_env_path)
 
-# ── Asset paths ───────────────────────────────────────────────────────────────
+# Asset paths
 _BASE_DIR  = get_app_root()
 _ASSET_DIR = _BASE_DIR / "assets" / "iso"
 
@@ -71,13 +63,13 @@ SHIELD_PNG_64  = _ASSET_DIR / "sentinel_64.png"
 def _ctk_image(path: Path, size: tuple) -> Optional[ctk.CTkImage]:
     """Load a PNG as a HiDPI-aware CTkImage, or return None if missing."""
     if not path.exists():
-        print(f"[assets] WARNING: {path} not found")
+        logger.warning(f"[assets] {path} not found")
         return None
     try:
         pil = Image.open(path).convert("RGBA")
         return ctk.CTkImage(light_image=pil, dark_image=pil, size=size)
     except Exception as e:
-        print(f"[assets] ERROR loading {path}: {e}")
+        logger.error(f"[assets] Error loading {path}: {e}")
         return None
 
 
@@ -90,10 +82,10 @@ def set_window_icon(window) -> None:
         try:
             window.iconbitmap(str(ICO_PATH))
         except Exception as e:
-            print(f"[assets] iconbitmap failed: {e}")
+            logger.error(f"[assets] iconbitmap failed: {e}")
 
 
-# ── Per-root image cache ──────────────────────────────────────────────────────
+# Per-root image cache
 # Images MUST be created after a Tk root exists, and MUST be re-created
 # if the root is destroyed and a new one made (login → logout → login).
 # Call clear_cache() in SentinelApp._on_login_success() before opening
@@ -105,7 +97,7 @@ _cache: dict = {}
 def clear_cache():
     """Clear the image cache. Call when switching between Tk roots."""
     _cache.clear()
-    print("[assets] Image cache cleared")
+    logger.info("Image cache cleared")
 
 
 def _get(key: str, path: Path, size: tuple) -> Optional[ctk.CTkImage]:
@@ -114,7 +106,7 @@ def _get(key: str, path: Path, size: tuple) -> Optional[ctk.CTkImage]:
     return _cache[key]
 
 
-# ── Public accessors ──────────────────────────────────────────────────────────
+# Public accessors
 
 def get_logo_64() -> Optional[ctk.CTkImage]:
     """64×64 SENTINEL logo (used on login screen)"""

@@ -115,14 +115,11 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
         manager.disconnect(websocket, user_id)
 
 
-# Original routers
 app.include_router(auth.router,          prefix=f"{settings.API_V1_PREFIX}/auth",          tags=["Authentication"])
 app.include_router(sessions.router,      prefix=f"{settings.API_V1_PREFIX}/sessions",       tags=["Sessions"])
 app.include_router(employees.router,     prefix=f"{settings.API_V1_PREFIX}/employees",      tags=["Employees"])
 app.include_router(abnormalities.router, prefix=f"{settings.API_V1_PREFIX}/abnormalities",  tags=["Abnormalities"])
 app.include_router(reports.router,       prefix=f"{settings.API_V1_PREFIX}/reports",        tags=["Reports"])
-
-# New routers — all tables now wired
 app.include_router(appeals.router,                  prefix=f"{settings.API_V1_PREFIX}/appeals",               tags=["Appeals"])
 app.include_router(audit_log.router,                prefix=f"{settings.API_V1_PREFIX}/audit",                 tags=["Audit Log"])
 app.include_router(work_rules.router,               prefix=f"{settings.API_V1_PREFIX}/work-rules",            tags=["Work Rules"])

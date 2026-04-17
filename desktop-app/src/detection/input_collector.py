@@ -1,40 +1,20 @@
-"""
-Input Collector — SENTINEL Desktop App
+import logging
+import platform
+import threading
+import time
+from collections import deque
+from datetime import datetime
+from typing import Optional, Callable, Dict, List
 
-Collects keyboard/mouse METADATA only. Privacy-safe by design.
-NO actual keystrokes, text content, clipboard content, or screen
-content is ever recorded. Only timing and size metadata.
-
-FIXES vs original GitHub version:
-  - idle_seconds now counts from session_start when no activity yet
-    (original was stuck at 0 until the first event fired)
-  - LARGE_PASTE_THRESHOLD raised 300 → 1000 chars (single paragraph is normal)
-  - VERY_LARGE_PASTE_THRESHOLD raised 1000 → 3000 chars
-  - DEMO_MODE imported from abnormality_detector — single switch controls both
-
-FEATURES:
-  - Windows API (GetAsyncKeyState) for 100% reliable Ctrl+V detection
-  - Clipboard SIZE detection via win32clipboard (size only, never content)
-  - Real-time mouse jiggler detection in _check_mouse_jiggler()
-  - Idle period tracking with callback
-  - Keyboard sitting / repetitive key detection
-  - Rapid paste burst detection
-"""
+from pynput import keyboard, mouse
 
 # Import DEMO_MODE from the single source of truth.
-# Flip it only in abnormality_detector.py — this file follows automatically.
 try:
     from detection.abnormality_detector import DEMO_MODE
 except ImportError:
     DEMO_MODE = False   # safe fallback when running standalone
 
-from pynput import keyboard, mouse
-from datetime import datetime
-from typing import Optional, Callable, Dict, List
-from collections import deque
-import threading
-import time
-import platform
+logger = logging.getLogger(__name__)
 
 # Windows clipboard (size only, never content)
 HAS_CLIPBOARD = False
@@ -161,9 +141,7 @@ class InputCollector:
         else:
             self.keys_pressed = set()
 
-    # ─────────────────────────────────────────────────────────
-    # LIFECYCLE
-    # ─────────────────────────────────────────────────────────
+    # Lifecycle
 
     def start_collecting(self):
         """Start all collection hooks. Idempotent."""
@@ -203,11 +181,11 @@ class InputCollector:
         self.idle_checker_thread.start()
 
         method = "Windows API" if self.use_win32 else "pynput fallback"
-        print(f"✓ Input collector started (privacy-safe mode)")
-        print(f"✓ Paste detection active ({method})")
+        logger.info(f"Input collector started (privacy-safe mode)")
+        logger.info(f"Paste detection active ({method})")
         if HAS_CLIPBOARD:
-            print(f"✓ Clipboard size detection active")
-        print(f"✓ Idle detection active")
+            logger.info(f"Clipboard size detection active")
+        logger.info(f"Idle detection active")
 
     def stop_collecting(self):
         """Stop all hooks cleanly."""
@@ -228,7 +206,7 @@ class InputCollector:
             except Exception:
                 pass
 
-        print("✓ Input collector stopped")
+        logger.info("Input collector stopped")
 
     # ─────────────────────────────────────────────────────────
     # PUBLIC SUMMARY METHODS (called by detection loop)
@@ -409,7 +387,7 @@ class InputCollector:
             self.stats["total_keystrokes"] += 1
 
         except Exception as e:
-            print(f"Error in key handler: {e}")
+            logger.error(f"Error in key handler: {e}")
 
     def _on_key_release(self, key):
         try:
@@ -472,7 +450,7 @@ class InputCollector:
             self.last_mouse_time = now
 
         except Exception as e:
-            print(f"Error in mouse handler: {e}")
+            logger.error(f"Error in mouse handler: {e}")
 
     def _on_mouse_click(self, x, y, button, pressed):
         try:
@@ -563,7 +541,7 @@ class InputCollector:
                     self._on_paste_detected(method)
                 time.sleep(0.01)
             except Exception as e:
-                print(f"Error in paste polling: {e}")
+                logger.error(f"Error in paste polling: {e}")
 
     def _get_clipboard_size(self) -> Optional[int]:
         """Return clipboard text byte length. Never returns actual content."""
@@ -660,13 +638,15 @@ class InputCollector:
                         })
 
         except Exception as e:
-            print(f"Error in paste detection: {e}")
+            logger.error(f"Error in paste detection: {e}")
 
 
 # ─── Standalone test ──────────────────────────────────────────
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+
     def on_pattern(pattern):
-        print(f"\n🚨 Pattern: {pattern['type']} "
               f"({pattern.get('confidence', 0):.0%}) — {pattern.get('details', '')}")
 
     collector = InputCollector(on_pattern_detected=on_pattern)

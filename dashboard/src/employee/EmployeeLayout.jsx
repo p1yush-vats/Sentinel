@@ -239,7 +239,7 @@ export default function EmployeeLayout() {
             SENTINEL
           </div>
           <div style={{ fontSize: 9, color: t.textMuted, letterSpacing: '2px', marginLeft: 2 }}>
-            // {NAV.find(n => n.path === location.pathname)?.label || 'EMPLOYEE'}
+            EMPLOYEE
           </div>
           {isAdmin && (
             <button
