@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: Optional[str] = None
     SMTP_FROM_EMAIL: Optional[str] = None
     
+    # HR Escalation
+    HR_ESCALATION_EMAIL: Optional[str] = None
+    
     # Work Rules Defaults
     DEFAULT_WORK_MINUTES_PER_HOUR: int = 50
     DEFAULT_BREAK_MINUTES_PER_HOUR: int = 10
