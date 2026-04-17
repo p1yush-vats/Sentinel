@@ -2,6 +2,7 @@ import asyncio
 import smtplib
 import logging
 from email.message import EmailMessage
+from email.utils import formataddr
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,17 @@ def _send_email_sync(to_email: str, subject: str, html_body: str):
 
     msg = EmailMessage()
     msg['Subject'] = subject
-    msg['From'] = settings.SMTP_FROM_EMAIL or settings.SMTP_USER
+    
+    # Forcefully format the display name to "trick" Gmail into keeping it
+    display_name = "Sentinel Work Integrity System"
+    if "<" in settings.SMTP_FROM_EMAIL:
+        # If the name is already in the .env, try to extract it
+        import re
+        match = re.search(r'^(.*?)\s*<(.*)>$', settings.SMTP_FROM_EMAIL)
+        if match:
+            display_name = match.group(1).strip()
+    
+    msg['From'] = formataddr((display_name, settings.SMTP_USER))
     msg['To'] = to_email
     msg.add_alternative(html_body, subtype='html')
 
