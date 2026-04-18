@@ -35,7 +35,7 @@ ARCHITECTURE NOTES:
 # ║  DEMO_MODE = True   → fast triggers  (presentation)        ║
 # ║  DEMO_MODE = False  → real thresholds (production)         ║
 # ╚══════════════════════════════════════════════════════════════╝
-DEMO_MODE = False
+DEMO_MODE = True
 
 from datetime import datetime
 from typing import Dict, List, Optional, Callable
