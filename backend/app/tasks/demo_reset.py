@@ -21,9 +21,10 @@ async def revert_demo_admin_changes():
     Then wipes any data (like tasks) created by the demo admin, ensuring
     changes made by visitors are temporary and reverted hourly.
     """
+    # Step 1: Ensure demo admin account exists (separate session so it always commits)
+    demo_admin_id = None
     try:
         async with AsyncSessionLocal() as session:
-            # 1. Find or create demo admin
             result = await session.execute(
                 select(Employee).where(Employee.email == DEMO_ADMIN_EMAIL)
             )
@@ -36,38 +37,41 @@ async def revert_demo_admin_changes():
                     password_hash=get_password_hash(DEMO_ADMIN_PASSWORD),
                     full_name="Demo Admin",
                     role="admin",
-                    department="Administration"
+                    department="Administration",
+                    is_active=True,
                 )
                 session.add(demo_admin)
                 await session.commit()
                 await session.refresh(demo_admin)
-            
-            demo_admin_id = demo_admin.id
+                logger.info(f"Demo Admin created successfully with id={demo_admin.id}")
+            else:
+                # Also ensure password is always reset to demo123
+                demo_admin.password_hash = get_password_hash(DEMO_ADMIN_PASSWORD)
+                demo_admin.is_active = True
+                await session.commit()
 
-            # 2. Delete Tasks assigned by demo admin
+            demo_admin_id = demo_admin.id
+    except Exception as e:
+        logger.error(f"Error ensuring demo admin account exists: {e}", exc_info=True)
+        return  # Don't proceed to cleanup if account step failed
+
+    # Step 2: Clean up temp data (separate session so failures don't affect account)
+    try:
+        async with AsyncSessionLocal() as session:
             stmt_tasks = delete(Task).where(Task.assigned_by == demo_admin_id)
             result = await session.execute(stmt_tasks)
             deleted_tasks = result.rowcount
 
-            # 3. Clean up generic dummy employees (just in case they figured out how to add employees)
-            # We delete employees whose email starts with demo-temp- to be safe.
             stmt_emps = delete(Employee).where(Employee.email.like("demo-temp-%"))
             result_emps = await session.execute(stmt_emps)
             deleted_emps = result_emps.rowcount
 
-            # 4. (Optional) Revert global work rules to standard baseline
-            # Here we just make sure standard work rule isn't permanently messed up.
-            # E.g., setting detection_sensitivity to medium, and work target to 400
-            # If the user has a specific rule they want to protect, we could hardcode it.
-            # But skipping for now unless the user says they mess with it a lot.
-
             await session.commit()
 
-            if deleted_tasks > 0 or deleted_emps > 0:
-                logger.info(f"Demo Reset Complete: Deleted {deleted_tasks} tasks and {deleted_emps} dummy employees created by Demo Admin.")
-            
+            logger.info(f"Demo Reset Complete: deleted {deleted_tasks} tasks, {deleted_emps} temp employees.")
     except Exception as e:
-        logger.error(f"Error during demo admin reset: {e}")
+        logger.error(f"Error during demo cleanup: {e}", exc_info=True)
+
 
 async def hourly_demo_reset_task():
     """
