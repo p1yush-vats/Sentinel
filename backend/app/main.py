@@ -20,7 +20,7 @@ from .core.websocket import manager
 
 
 import asyncio
-from .tasks.demo_reset import hourly_demo_reset_task
+from .tasks.demo_reset import hourly_demo_reset_task, revert_demo_admin_changes
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -30,7 +30,12 @@ async def lifespan(app: FastAPI):
         await init_db()
         logger.info("Database initialized successfully")
         
-        # Start the hourly demo reset background task
+        # Run demo reset IMMEDIATELY and wait for it — ensures demo accounts
+        # exist before the server starts accepting login requests
+        await revert_demo_admin_changes()
+        logger.info("Demo accounts initialized")
+
+        # Then launch the hourly background cleanup loop
         demo_reset_task = asyncio.create_task(hourly_demo_reset_task())
         logger.info("Hourly demo reset task started")
     except Exception as e:
