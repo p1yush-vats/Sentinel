@@ -193,17 +193,20 @@ export default function Tasks() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-sentinel-border">
-                  {['Task', 'Assigned To', 'Priority', 'Status', 'Due Date', ''].map(h => (
-                    <th key={h} className="text-left px-4 py-3 text-xs font-mono text-sentinel-muted uppercase tracking-wider">{h}</th>
-                  ))}
+                  <th className="text-left pl-6 pr-4 py-3 text-xs font-mono text-sentinel-muted uppercase tracking-wider w-2/5">Task</th>
+                  <th className="text-left px-4 py-3 text-xs font-mono text-sentinel-muted uppercase tracking-wider w-1/5">Assigned To</th>
+                  <th className="text-left px-4 py-3 text-xs font-mono text-sentinel-muted uppercase tracking-wider w-[110px]">Priority</th>
+                  <th className="text-left px-4 py-3 text-xs font-mono text-sentinel-muted uppercase tracking-wider w-[110px]">Status</th>
+                  <th className="text-left px-4 py-3 text-xs font-mono text-sentinel-muted uppercase tracking-wider w-[110px]">Due Date</th>
+                  <th className="w-[48px]" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-sentinel-border/50">
                 {tasks.map(task => (
                   <tr key={task.id} className="hover:bg-navy-800/40 transition-colors group">
-                    <td className="px-4 py-3">
+                    <td className="pl-6 pr-4 py-3">
                       <p className="text-sm font-mono text-sentinel-text font-medium">{task.title}</p>
-                      {task.description && <p className="text-xs font-mono text-sentinel-muted mt-0.5 max-w-xs truncate">{task.description}</p>}
+                      {task.description && <p className="text-xs font-mono text-sentinel-muted mt-0.5 max-w-sm truncate">{task.description}</p>}
                       {task.completion_note && task.status === 'completed' && (
                         <p className="text-xs font-mono text-emerald-400 mt-0.5">Note: {task.completion_note}</p>
                       )}
@@ -222,7 +225,7 @@ export default function Tasks() {
                     <td className="px-4 py-3 text-xs font-mono text-sentinel-muted">
                       {task.due_date ? new Date(task.due_date).toLocaleDateString('en-IN') : '—'}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 text-right">
                       <button
                         onClick={() => handleDelete(task.id)}
                         className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-400/10"
