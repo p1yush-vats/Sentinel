@@ -24,24 +24,26 @@ from .tasks.demo_reset import hourly_demo_reset_task, revert_demo_admin_changes
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting SENTINEL Backend...")
-    demo_reset_task = None
+    # Step 1: Initialize DB tables (may fail if already exist — that's fine)
     try:
         await init_db()
         logger.info("Database initialized successfully")
-        
-        # Run demo reset IMMEDIATELY and wait for it — ensures demo accounts
-        # exist before the server starts accepting login requests
-        await revert_demo_admin_changes()
-        logger.info("Demo accounts initialized")
+    except Exception as e:
+        logger.warning(f"Database initialization skipped (tables likely exist): {e}")
 
-        # Then launch the hourly background cleanup loop
+    # Step 2: Ensure demo accounts exist — MUST run independently of init_db
+    try:
+        await revert_demo_admin_changes()
+        logger.info("Demo accounts initialized successfully")
+    except Exception as e:
+        logger.error(f"Demo account setup failed: {e}", exc_info=True)
+
+    # Step 3: Start hourly background cleanup loop
+    try:
         demo_reset_task = asyncio.create_task(hourly_demo_reset_task())
         logger.info("Hourly demo reset task started")
     except Exception as e:
-        logger.warning(f"Database initialization failed: {e}")
-        logger.warning("Server will start but database features may not work")
-        logger.warning("Check your DATABASE_URL in .env file")
+        logger.error(f"Failed to start demo reset task: {e}")
     
     yield
     
