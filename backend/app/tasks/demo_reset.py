@@ -71,17 +71,19 @@ async def revert_demo_admin_changes():
 
 async def hourly_demo_reset_task():
     """
-    Background worker that sleeps for 1 hour and reverts demo admin changes.
+    Background worker that immediately creates/resets demo admin on startup,
+    then runs again every hour.
     """
     logger.info("Hourly Demo Reset Background Task Started.")
     while True:
         try:
-            # Initial run happens after the first interval
-            await asyncio.sleep(3600)  # 60 minutes
+            # Run immediately on startup, then sleep 60 minutes before next run
             await revert_demo_admin_changes()
+            await asyncio.sleep(3600)  # 60 minutes
         except asyncio.CancelledError:
             logger.info("Hourly Demo Reset Background Task Stopped.")
             break
         except Exception as e:
             logger.error(f"Unexpected error in hourly_demo_reset_task: {e}")
             await asyncio.sleep(60) # Pause shortly before retrying
+
