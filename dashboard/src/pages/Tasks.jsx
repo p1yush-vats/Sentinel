@@ -31,22 +31,23 @@ function AssignModal({ employees, onClose, onCreate }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in p-4">
       <div className="bg-navy-800 border border-sentinel-border rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-in">
-        <div className="p-4 border-b border-sentinel-border bg-navy-900/50 flex justify-between items-center">
+        {/* Header */}
+        <div className="px-5 py-3.5 border-b border-sentinel-border bg-navy-900/50 flex justify-between items-center">
           <div className="flex items-center gap-2">
-            <CheckSquare className="w-5 h-5 text-violet-400" />
-            <h3 className="font-display font-semibold text-sentinel-text">Assign New Task</h3>
+            <CheckSquare className="w-4 h-4 text-violet-400" />
+            <h3 className="font-display font-semibold text-sentinel-text text-sm">Assign New Task</h3>
           </div>
-          <button onClick={onClose} className="text-sentinel-muted hover:text-white transition-colors"><X className="w-5 h-5" /></button>
+          <button onClick={onClose} className="text-sentinel-muted hover:text-white transition-colors"><X className="w-4 h-4" /></button>
         </div>
 
-        <div className="p-5 space-y-4">
+        <div className="p-5 space-y-3">
           {/* Title */}
           <div>
-            <p className="label mb-1">Task Title *</p>
+            <p className="label mb-1 text-xs">Task Title *</p>
             <input
-              className="input-field w-full"
+              className="input-field w-full text-sm"
               placeholder="e.g. Submit monthly timesheet"
               value={form.title}
               onChange={e => setForm(p => ({ ...p, title: e.target.value }))}
@@ -55,49 +56,49 @@ function AssignModal({ employees, onClose, onCreate }) {
 
           {/* Description */}
           <div>
-            <p className="label mb-1">Description</p>
+            <p className="label mb-1 text-xs">Description</p>
             <textarea
-              className="input-field w-full resize-none h-20"
+              className="input-field w-full resize-none h-14 text-sm"
               placeholder="Optional details..."
               value={form.description}
               onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
             />
           </div>
 
-          {/* Employee */}
-          <div>
-            <p className="label mb-1">Assign To *</p>
-            <select
-              className="input-field w-full"
-              value={form.assigned_to}
-              onChange={e => setForm(p => ({ ...p, assigned_to: e.target.value }))}
-            >
-              <option value="">— Select employee —</option>
-              {employees.filter(e => e.role !== 'admin').map(e => (
-                <option key={e.id} value={e.id}>{e.full_name} ({e.department || 'No dept'})</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Priority + Due Date */}
+          {/* Assign To + Priority */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <p className="label mb-1">Priority</p>
-              <select className="input-field w-full" value={form.priority} onChange={e => setForm(p => ({ ...p, priority: e.target.value }))}>
+              <p className="label mb-1 text-xs">Assign To *</p>
+              <select
+                className="input-field w-full text-sm"
+                value={form.assigned_to}
+                onChange={e => setForm(p => ({ ...p, assigned_to: e.target.value }))}
+              >
+                <option value="">— Select —</option>
+                {employees.filter(e => e.role !== 'admin').map(e => (
+                  <option key={e.id} value={e.id}>{e.full_name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <p className="label mb-1 text-xs">Priority</p>
+              <select className="input-field w-full text-sm" value={form.priority} onChange={e => setForm(p => ({ ...p, priority: e.target.value }))}>
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
                 <option value="high">High</option>
                 <option value="urgent">Urgent</option>
               </select>
             </div>
-            <div>
-              <p className="label mb-1">Due Date</p>
-              <input type="date" className="input-field w-full" value={form.due_date} onChange={e => setForm(p => ({ ...p, due_date: e.target.value }))} />
-            </div>
+          </div>
+
+          {/* Due Date */}
+          <div>
+            <p className="label mb-1 text-xs">Due Date</p>
+            <input type="date" className="input-field w-full text-sm" value={form.due_date} onChange={e => setForm(p => ({ ...p, due_date: e.target.value }))} />
           </div>
         </div>
 
-        <div className="p-4 bg-navy-900/50 border-t border-sentinel-border flex justify-end gap-3">
+        <div className="px-5 py-3.5 bg-navy-900/50 border-t border-sentinel-border flex justify-end gap-3">
           <button onClick={onClose} className="btn-ghost text-sm">Cancel</button>
           <button onClick={submit} disabled={saving} className="btn-primary flex items-center gap-2 text-sm disabled:opacity-50">
             <Plus size={14} /> {saving ? 'Creating…' : 'Assign Task'}
@@ -106,6 +107,7 @@ function AssignModal({ employees, onClose, onCreate }) {
       </div>
     </div>
   )
+
 }
 
 export default function Tasks() {
