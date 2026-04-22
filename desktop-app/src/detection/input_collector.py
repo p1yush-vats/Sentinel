@@ -647,7 +647,7 @@ if __name__ == "__main__":
     logger = logging.getLogger(__name__)
 
     def on_pattern(pattern):
-              f"({pattern.get('confidence', 0):.0%}) — {pattern.get('details', '')}")
+        print(f"({pattern.get('confidence', 0):.0%}) — {pattern.get('details', '')}")
 
     collector = InputCollector(on_pattern_detected=on_pattern)
     collector.start_collecting()

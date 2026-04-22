@@ -11,7 +11,7 @@
 #define MyAppName      "SENTINEL"
 #define MyAppVersion   "1.0.0"
 #define MyAppPublisher "SENTINEL"
-#define MyAppExeName   "SENTINEL.exe"
+#define MyAppExeName   "SENTINEL_DEMO.exe"
 #define MyAppIcon      "assets\iso\sentinel.ico"
 
 [Setup]
@@ -43,7 +43,7 @@ Name: "startmenuicon"; Description: "Create a &Start Menu shortcut"; GroupDescri
 Name: "startupicon"; Description: "Start SENTINEL with &Windows"; GroupDescription: "Startup:"; Flags: unchecked
 
 [Files]
-Source: "dist\SENTINEL.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\SENTINEL_DEMO.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\.env"; DestDir: "{app}"; Flags: ignoreversion; Check: FileExists('dist\.env')
 
 [Icons]

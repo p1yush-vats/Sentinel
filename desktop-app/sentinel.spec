@@ -186,11 +186,11 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="SENTINEL",
+    name="SENTINEL_DEMO",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,           # set False if UPX is not installed
+    upx=False,           # set False if UPX is not installed
     upx_exclude=[
         # These DLLs are known to break when UPX-compressed
         "vcruntime140.dll",

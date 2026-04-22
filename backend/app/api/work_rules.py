@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 from ..core.database import get_db
-from ..core.security import get_current_user_id, RoleChecker
+from ..core.security import get_current_user_id, RoleChecker, get_current_user_email
 from ..models.work_rule import WorkRule
 from .audit_log import write_audit
 
@@ -50,8 +50,11 @@ async def get_work_rules(
 async def create_work_rule(
     data:     WorkRuleCreate,
     admin_id: str = Depends(get_current_user_id),
+    admin_email: str = Depends(get_current_user_email),
     db:       AsyncSession = Depends(get_db),
 ):
+    if admin_email == "demo-admin@sentinel.com":
+        raise HTTPException(status_code=403, detail="Demo accounts cannot modify work rules")
     if data.detection_sensitivity not in ('low', 'medium', 'high'):
         raise HTTPException(status_code=400, detail="sensitivity must be low | medium | high")
 
@@ -81,8 +84,11 @@ async def update_work_rule(
     rule_id:  str,
     data:     WorkRuleUpdate,
     admin_id: str = Depends(get_current_user_id),
+    admin_email: str = Depends(get_current_user_email),
     db:       AsyncSession = Depends(get_db),
 ):
+    if admin_email == "demo-admin@sentinel.com":
+        raise HTTPException(status_code=403, detail="Demo accounts cannot modify work rules")
     result = await db.execute(select(WorkRule).where(WorkRule.id == rule_id))
     rule = result.scalar_one_or_none()
     if not rule:
@@ -120,8 +126,11 @@ async def update_work_rule(
 async def delete_work_rule(
     rule_id:  str,
     admin_id: str = Depends(get_current_user_id),
+    admin_email: str = Depends(get_current_user_email),
     db:       AsyncSession = Depends(get_db),
 ):
+    if admin_email == "demo-admin@sentinel.com":
+        raise HTTPException(status_code=403, detail="Demo accounts cannot modify work rules")
     result = await db.execute(select(WorkRule).where(WorkRule.id == rule_id))
     rule = result.scalar_one_or_none()
     if not rule:

@@ -19,18 +19,31 @@ logger = logging.getLogger(__name__)
 from .core.websocket import manager
 
 
+import asyncio
+from .tasks.demo_reset import hourly_demo_reset_task
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting SENTINEL Backend...")
+    demo_reset_task = None
     try:
         await init_db()
         logger.info("Database initialized successfully")
+        
+        # Start the hourly demo reset background task
+        demo_reset_task = asyncio.create_task(hourly_demo_reset_task())
+        logger.info("Hourly demo reset task started")
     except Exception as e:
         logger.warning(f"Database initialization failed: {e}")
         logger.warning("Server will start but database features may not work")
         logger.warning("Check your DATABASE_URL in .env file")
+    
     yield
+    
     logger.info("Shutting down SENTINEL Backend...")
+    if demo_reset_task:
+        demo_reset_task.cancel()
+        
     try:
         await close_db()
         logger.info("Database connections closed")

@@ -139,6 +139,11 @@ async def change_password(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        
+    # Protect demo accounts from being locked out by public users
+    if user.email in ["demo-employee@sentinel.com", "demo-admin@sentinel.com"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Demo accounts cannot change their passwords.")
+        
     if not verify_password(request_data.current_password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
 

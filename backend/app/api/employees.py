@@ -5,7 +5,7 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional
 
 from ..core.database import get_db
-from ..core.security import get_current_user_id, RoleChecker, get_password_hash
+from ..core.security import get_current_user_id, RoleChecker, get_password_hash, get_current_user_email
 from ..models.employee import Employee
 from ..models.session import Session
 from ..models.abnormality import Abnormality
@@ -166,8 +166,13 @@ async def get_employee(
 @router.post("/", dependencies=[Depends(RoleChecker(["admin"]))])
 async def create_employee(
     data: EmployeeCreate,
-    db:   AsyncSession = Depends(get_db)
+    db:   AsyncSession = Depends(get_db),
+    admin_email: str = Depends(get_current_user_email)
 ):
+    if admin_email == "demo-admin@sentinel.com":
+        if not data.email.startswith("demo-temp-"):
+            data.email = f"demo-temp-{data.email}"
+
     result = await db.execute(select(Employee).where(Employee.email == data.email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -195,12 +200,17 @@ async def create_employee(
 async def update_employee(
     employee_id: str,
     data:        EmployeeUpdate,
-    db:          AsyncSession = Depends(get_db)
+    db:          AsyncSession = Depends(get_db),
+    admin_email: str = Depends(get_current_user_email)
 ):
     result = await db.execute(select(Employee).where(Employee.id == employee_id))
     employee = result.scalar_one_or_none()
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+
+    if admin_email == "demo-admin@sentinel.com":
+        if not employee.email.startswith("demo-"):
+            raise HTTPException(status_code=403, detail="Demo accounts cannot modify real employees")
 
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(employee, field, value)
@@ -213,12 +223,18 @@ async def update_employee(
 @router.delete("/{employee_id}", dependencies=[Depends(RoleChecker(["admin"]))])
 async def delete_employee(
     employee_id: str,
-    db:          AsyncSession = Depends(get_db)
+    db:          AsyncSession = Depends(get_db),
+    admin_email: str = Depends(get_current_user_email)
 ):
     result = await db.execute(select(Employee).where(Employee.id == employee_id))
     employee = result.scalar_one_or_none()
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+        
+    if admin_email == "demo-admin@sentinel.com":
+        if not employee.email.startswith("demo-"):
+            raise HTTPException(status_code=403, detail="Demo accounts cannot delete real employees")
+            
     await db.delete(employee)
     await db.commit()
     return {"message": "Employee deleted successfully"}
@@ -270,6 +286,10 @@ async def force_change_password(
     employee = result.scalar_one_or_none()
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+
+    # Protect demo accounts from having their passwords changed
+    if employee.email in ["demo-employee@sentinel.com", "demo-admin@sentinel.com"]:
+        raise HTTPException(status_code=403, detail="Cannot force change password for demo accounts.")
 
     employee.password_hash = get_password_hash(request_data.new_password)
     await db.commit()
