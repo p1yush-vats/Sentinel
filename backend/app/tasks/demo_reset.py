@@ -58,17 +58,44 @@ async def revert_demo_admin_changes():
     # Step 2: Clean up temp data (separate session so failures don't affect account)
     try:
         async with AsyncSessionLocal() as session:
+            # Delete tasks assigned by demo admin
             stmt_tasks = delete(Task).where(Task.assigned_by == demo_admin_id)
             result = await session.execute(stmt_tasks)
             deleted_tasks = result.rowcount
 
+            # Delete temp employees created by demo admin
             stmt_emps = delete(Employee).where(Employee.email.like("demo-temp-%"))
             result_emps = await session.execute(stmt_emps)
             deleted_emps = result_emps.rowcount
 
+            # Revert abnormality reviews done by demo admin (un-review them)
+            from sqlalchemy import update
+            stmt_abnorm = (
+                update(Abnormality)
+                .where(Abnormality.reviewed_by == demo_admin_id)
+                .values(
+                    reviewed=False,
+                    reviewed_by=None,
+                    review_decision=None,
+                    review_note=None,
+                    reviewed_at=None,
+                )
+            )
+            result_abnorm = await session.execute(stmt_abnorm)
+            reverted_flags = result_abnorm.rowcount
+
+            # Delete admin actions (warnings/escalations) made by demo admin
+            stmt_actions = delete(AdminAction).where(AdminAction.admin_id == demo_admin_id)
+            result_actions = await session.execute(stmt_actions)
+            deleted_actions = result_actions.rowcount
+
             await session.commit()
 
-            logger.info(f"Demo Reset Complete: deleted {deleted_tasks} tasks, {deleted_emps} temp employees.")
+            logger.info(
+                f"Demo Reset Complete: deleted {deleted_tasks} tasks, "
+                f"{deleted_emps} temp employees, reverted {reverted_flags} flag reviews, "
+                f"deleted {deleted_actions} admin actions."
+            )
     except Exception as e:
         logger.error(f"Error during demo cleanup: {e}", exc_info=True)
 
