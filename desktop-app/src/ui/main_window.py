@@ -21,6 +21,7 @@ FIXES:
   - _tick delta detection prevents redundant update_state_ui calls
 """
 
+import logging
 import customtkinter as ctk
 from PIL import Image, ImageDraw
 from pathlib import Path
@@ -33,14 +34,14 @@ import urllib.request
 import io
 import webbrowser
 
+logger = logging.getLogger(__name__)
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.time_engine import SessionState
 from core.config import Config
 
 
-# ─────────────────────────────────────────────────────────────────
 # Notification Manager
-# ─────────────────────────────────────────────────────────────────
 class NotificationManager:
     """
     Sends Windows OS toast notifications via winotify.
@@ -56,8 +57,7 @@ class NotificationManager:
             self._available    = True
         except ImportError:
             self._available = False
-            print("[Notifications] winotify not installed — OS toasts disabled.")
-            print("[Notifications] Run: pip install winotify")
+            logger.warning("winotify not installed — OS toasts disabled. Run: pip install winotify")
 
     def send(self, title: str, msg: str, severity: str = "info") -> None:
         """
@@ -88,7 +88,7 @@ class NotificationManager:
                 toast.set_audio(audio.Reminder, loop=False)
             toast.show()
         except Exception as e:
-            print(f"[Notifications] Toast error: {e}")
+            logger.error(f"Toast error: {e}")
 
 
 
@@ -107,7 +107,7 @@ def _load_ctk_image(filename: str, size: tuple) -> Optional[ctk.CTkImage]:
         return None
 
 
-# ── Palette ──────────────────────────────────────────────────
+# Palette
 BG0  = "#0B1120"; BG1 = "#0D1526"; BG2 = "#111C2E"
 BG3  = "#1A2640"; BORD = "#1E2D45"; BORD2 = "#243450"
 
@@ -122,9 +122,7 @@ R_BG = "#1A0D0D"; R_BD = "#3B1010"
 P_BG = "#150D2E"; P_BD = "#2D1A5E"
 
 
-# ─────────────────────────────────────────────────────────────
 # Feed item widget
-# ─────────────────────────────────────────────────────────────
 class FeedItem(ctk.CTkFrame):
     _PAL = {
         "warn": dict(bg=A_BG, border=A_BD, ibg="#3B2C00", ifg=AMBER, bbg="#3B2C00", bfg=AMBER),
@@ -166,9 +164,7 @@ class FeedItem(ctk.CTkFrame):
                      ).grid(row=1, column=1, sticky="w", padx=(0, 8), pady=(0, 8))
 
 
-# ─────────────────────────────────────────────────────────────
 # Sidebar nav button
-# ─────────────────────────────────────────────────────────────
 class NavButton(ctk.CTkFrame):
     def __init__(self, parent, label: str, icon: str,
                  active: bool = False, command: Callable = None, **kw):
@@ -192,9 +188,7 @@ class NavButton(ctk.CTkFrame):
             self._cmd()
 
 
-# ─────────────────────────────────────────────────────────────
 # In-app notification banner
-# ─────────────────────────────────────────────────────────────
 class _NotificationBanner(ctk.CTkFrame):
     """Slim slide-in banner that appears at the top of the content area."""
     _PAL = {
@@ -251,13 +245,11 @@ class _NotificationBanner(ctk.CTkFrame):
             pass
 
 
-# ─────────────────────────────────────────────────────────────
 # Main window
-# ─────────────────────────────────────────────────────────────
 class MainWindow(ctk.CTk):
     MAX_FEED = 80
 
-    def __init__(self, user: dict, access_token: str, time_engine=None):
+    def __init__(self, user: dict, access_token: str, time_engine=None, session_manager=None):
         super().__init__()
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
@@ -265,6 +257,7 @@ class MainWindow(ctk.CTk):
         self.user         = user
         self.access_token = access_token
         self.time_engine  = time_engine
+        self.session_manager = session_manager
 
         # Notification Manager (OS toasts)
         self.notifier = NotificationManager()
@@ -301,12 +294,8 @@ class MainWindow(ctk.CTk):
         self.minsize(940, 640)
         self.configure(fg_color=BG0)
 
-        ico = _asset("sentinel.ico")
-        if ico.exists():
-            try:
-                self.iconbitmap(str(ico))
-            except Exception:
-                pass
+        from utils.assets import set_window_icon
+        set_window_icon(self)
 
         self.update_idletasks()
         w, h = 1140, 720
@@ -318,9 +307,7 @@ class MainWindow(ctk.CTk):
         self._build()
         self._tick()
 
-    # ─────────────────────────────────────────────────────────
-    # BUILD
-    # ─────────────────────────────────────────────────────────
+    # Build methods
     def _build(self):
         # Load image HERE — after this CTk window is the active Tk root.
         # Loading earlier (e.g. in __init__) binds the PhotoImage to the
@@ -332,7 +319,7 @@ class MainWindow(ctk.CTk):
         self._build_sidebar()
         self._build_mainarea()
 
-    # ── Sidebar ──────────────────────────────────────────────
+    # Sidebar
     def _build_sidebar(self):
         sb = ctk.CTkFrame(self, width=220, fg_color=BG1, corner_radius=0)
         sb.grid(row=0, column=0, sticky="nsew")
@@ -345,12 +332,22 @@ class MainWindow(ctk.CTk):
         brand.grid_propagate(False)
         inner = ctk.CTkFrame(brand, fg_color="transparent")
         inner.place(x=18, rely=0.5, anchor="w")
-        sh = ctk.CTkFrame(inner, width=32, height=32,
-                           fg_color="#1E3A6E", corner_radius=8)
-        sh.pack(side="left", padx=(0, 10))
-        sh.pack_propagate(False)
-        ctk.CTkLabel(sh, text="S", font=("Arial", 14, "bold"),
-                     text_color=BLUE).place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Load Skull Logo
+        from utils.assets import get_logo_32
+        logo_img = get_logo_32()
+        
+        if logo_img:
+            sh = ctk.CTkLabel(inner, image=logo_img, text="")
+            sh.pack(side="left", padx=(0, 10))
+        else:
+            sh = ctk.CTkFrame(inner, width=32, height=32,
+                               fg_color="#1E3A6E", corner_radius=8)
+            sh.pack(side="left", padx=(0, 10))
+            sh.pack_propagate(False)
+            ctk.CTkLabel(sh, text="S", font=("Arial", 14, "bold"),
+                         text_color=BLUE).place(relx=0.5, rely=0.5, anchor="center")
+                         
         ctk.CTkLabel(inner, text="SENTINEL",
                      font=("Arial", 15, "bold"), text_color=T1).pack(side="left")
 
@@ -372,6 +369,11 @@ class MainWindow(ctk.CTk):
             nav, "Tasks", "✓",
             command=lambda: self._show_view("tasks"))
         self._nav_btns["tasks"].pack(fill="x", pady=2)
+
+        self._nav_btns["team"] = NavButton(
+            nav, "My Team", "👥",
+            command=lambda: self._open_portal("my/team"))
+        self._nav_btns["team"].pack(fill="x", pady=2)
 
         # ── Portal shortcut tabs (open employee portal in default browser) ──
         portal_items = [
@@ -423,7 +425,7 @@ class MainWindow(ctk.CTk):
                       text_color=T3, font=("Arial", 11), corner_radius=8
                       ).grid(row=4, column=0, sticky="ew", padx=14, pady=10)
 
-    # ── Avatar Fetching ──────────────────────────────────────
+    # Avatar Fetching
     def _load_avatar_async(self):
         url = self.user.get("avatar_url")
         if not url:
@@ -452,7 +454,7 @@ class MainWindow(ctk.CTk):
                 # Update UI safely on main thread passing the raw PIL image
                 self.after(0, lambda: self._apply_avatar(output))
             except Exception as e:
-                print(f"Failed to fetch avatar: {e}")
+                logger.error(f"Failed to fetch avatar: {e}")
 
         threading.Thread(target=fetch, daemon=True).start()
         
@@ -483,7 +485,7 @@ class MainWindow(ctk.CTk):
             daemon=True
         ).start()
 
-    # ── Main area ─────────────────────────────────────────────
+    # Main area
     def _build_mainarea(self):
 
         main = ctk.CTkFrame(self, fg_color=BG0, corner_radius=0)
@@ -547,6 +549,12 @@ class MainWindow(ctk.CTk):
         self._tasks_loading = False
         self._build_tasks_view()
 
+        # Team View
+        self.team_frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
+        self.team_frame.grid_rowconfigure(0, weight=1)
+        self.team_frame.grid_columnconfigure(0, weight=1)
+        self.team_view_widget = None
+
         self._show_view("dashboard")
 
     def _toggle_alerts_panel(self):
@@ -560,7 +568,7 @@ class MainWindow(ctk.CTk):
             self._right_panel_view = "feed"
 
     def _show_view(self, view_name: str):
-        for f in [self.dashboard_frame, self.tasks_frame]:
+        for f in [self.dashboard_frame, self.tasks_frame, self.team_frame]:
             try:
                 f.grid_remove()
             except Exception:
@@ -579,6 +587,20 @@ class MainWindow(ctk.CTk):
         elif view_name == "tasks":
             self.tasks_frame.grid(row=1, column=0, sticky="nsew")
             self._fetch_tasks()
+        elif view_name == "team":
+            if not self.team_view_widget:
+                from ui.team_view import TeamView
+                self.team_view_widget = TeamView(
+                    self.team_frame,
+                    user=self.user,
+                    access_token=self.access_token,
+                    api_base_url=Config.API_BASE_URL,
+                    session_manager=self.session_manager
+                )
+                self.team_view_widget.pack(fill="both", expand=True)
+            else:
+                self.team_view_widget.refresh_all()
+            self.team_frame.grid(row=1, column=0, sticky="nsew")
 
         if hasattr(self, '_nav_btns') and view_name in self._nav_btns:
             btn = self._nav_btns[view_name]
@@ -1157,9 +1179,7 @@ class MainWindow(ctk.CTk):
         self.alerts_empty = ctk.CTkLabel(self.alerts_scroll, text="No alerts received yet.", font=("Arial", 11), text_color=T3, justify="center")
         self.alerts_empty.pack(pady=40)
 
-    # ─────────────────────────────────────────────────────────
-    # PUBLIC API — called by SentinelApp (main.py)
-    # ─────────────────────────────────────────────────────────
+    # Public API
 
     def update_state_ui(self, state: SessionState, data: dict):
         """Update all UI elements to reflect the new session state."""
@@ -1420,9 +1440,7 @@ class MainWindow(ctk.CTk):
                       font=("Arial", 13, "bold"), text_color=BLUE
                       ).pack(fill="x", padx=28, pady=(0, 28))
 
-    # ─────────────────────────────────────────────────────────
-    # TICK — called every second
-    # ─────────────────────────────────────────────────────────
+    # Tick — called every second
     def _tick(self):
         if self.time_engine:
             try:
@@ -1437,7 +1455,7 @@ class MainWindow(ctk.CTk):
                     self._prev_state  = cur
                     self._prev_tokens = tokens
             except Exception as e:
-                print(f"Tick error: {e}")
+                logger.error(f"Tick error: {e}")
 
         self.after(1000, self._tick)
 
@@ -1473,9 +1491,7 @@ class MainWindow(ctk.CTk):
         except Exception:
             pass
 
-    # ─────────────────────────────────────────────────────────
-    # PRIVATE HELPERS
-    # ─────────────────────────────────────────────────────────
+    # Private Helpers
 
     def _set_badge(self, text: str, fg: str, bg: str, border: str):
         """Update both the topbar badge and the timer card badge."""
@@ -1563,9 +1579,7 @@ class MainWindow(ctk.CTk):
         self._safe_grid_remove(self._break_card)
         self._break_visible = False
 
-    # ─────────────────────────────────────────────────────────
-    # BUTTON HANDLERS
-    # ─────────────────────────────────────────────────────────
+    # Button Handlers
 
     def _toggle_session(self):
         if not self.time_engine:

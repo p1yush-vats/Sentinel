@@ -5,7 +5,7 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional
 
 from ..core.database import get_db
-from ..core.security import get_current_user_id, RoleChecker, get_password_hash
+from ..core.security import get_current_user_id, RoleChecker, get_password_hash, get_current_user_email
 from ..models.employee import Employee
 from ..models.session import Session
 from ..models.abnormality import Abnormality
@@ -146,6 +146,55 @@ async def get_employees(
     return {"employees": employee_dicts, "total": len(employee_dicts)}
 
 
+@router.get("/my-team")
+async def get_my_team(
+    db: AsyncSession = Depends(get_db),
+    current_user_id: str = Depends(get_current_user_id)
+):
+    # Get current user's department
+    import uuid as _uuid
+    try:
+        me_uuid = _uuid.UUID(current_user_id)
+    except ValueError:
+        return {"team": []}
+        
+    result = await db.execute(select(Employee).where(Employee.id == me_uuid))
+    me = result.scalar_one_or_none()
+    if not me or not me.department:
+        return {"team": []}
+        
+    # Get all active employees in same department except self
+    q = select(Employee).where(
+        Employee.department == me.department,
+        Employee.is_active == True,
+        Employee.id != me_uuid
+    ).order_by(Employee.full_name)
+    
+    result = await db.execute(q)
+    team_members = result.scalars().all()
+    
+    if not team_members:
+        return {"team": []}
+        
+    team_ids = [emp.id for emp in team_members]
+    
+    # Check active session to check online status (Now using Websocket Manager!)
+    from ..core.websocket import manager
+    
+    team_dicts = []
+    for emp in team_members:
+        team_dicts.append({
+            "id": str(emp.id),
+            "full_name": emp.full_name,
+            "position": emp.position,
+            "avatar_url": emp.avatar_url,
+            "email": emp.email,
+            "is_online": str(emp.id) in manager.active_connections
+        })
+        
+    return {"team": team_dicts}
+
+
 @router.get("/{employee_id}")
 async def get_employee(
     employee_id:     str,
@@ -166,8 +215,13 @@ async def get_employee(
 @router.post("/", dependencies=[Depends(RoleChecker(["admin"]))])
 async def create_employee(
     data: EmployeeCreate,
-    db:   AsyncSession = Depends(get_db)
+    db:   AsyncSession = Depends(get_db),
+    admin_email: str = Depends(get_current_user_email)
 ):
+    if admin_email == "demo-admin@sentinel.com":
+        if not data.email.startswith("demo-temp-"):
+            data.email = f"demo-temp-{data.email}"
+
     result = await db.execute(select(Employee).where(Employee.email == data.email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -195,12 +249,17 @@ async def create_employee(
 async def update_employee(
     employee_id: str,
     data:        EmployeeUpdate,
-    db:          AsyncSession = Depends(get_db)
+    db:          AsyncSession = Depends(get_db),
+    admin_email: str = Depends(get_current_user_email)
 ):
     result = await db.execute(select(Employee).where(Employee.id == employee_id))
     employee = result.scalar_one_or_none()
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+
+    if admin_email == "demo-admin@sentinel.com":
+        if not employee.email.startswith("demo-"):
+            raise HTTPException(status_code=403, detail="Demo accounts cannot modify real employees")
 
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(employee, field, value)
@@ -213,12 +272,18 @@ async def update_employee(
 @router.delete("/{employee_id}", dependencies=[Depends(RoleChecker(["admin"]))])
 async def delete_employee(
     employee_id: str,
-    db:          AsyncSession = Depends(get_db)
+    db:          AsyncSession = Depends(get_db),
+    admin_email: str = Depends(get_current_user_email)
 ):
     result = await db.execute(select(Employee).where(Employee.id == employee_id))
     employee = result.scalar_one_or_none()
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+        
+    if admin_email == "demo-admin@sentinel.com":
+        if not employee.email.startswith("demo-"):
+            raise HTTPException(status_code=403, detail="Demo accounts cannot delete real employees")
+            
     await db.delete(employee)
     await db.commit()
     return {"message": "Employee deleted successfully"}
@@ -270,6 +335,10 @@ async def force_change_password(
     employee = result.scalar_one_or_none()
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+
+    # Protect demo accounts from having their passwords changed
+    if employee.email in ["demo-employee@sentinel.com", "demo-admin@sentinel.com"]:
+        raise HTTPException(status_code=403, detail="Cannot force change password for demo accounts.")
 
     employee.password_hash = get_password_hash(request_data.new_password)
     await db.commit()

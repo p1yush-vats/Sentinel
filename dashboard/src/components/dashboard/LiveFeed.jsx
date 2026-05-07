@@ -36,7 +36,7 @@ export default function LiveFeed() {
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
   
-  const httpUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+  const httpUrl = import.meta.env.VITE_API_URL || 'https://sentinel-ny7w.onrender.com/api/v1';
   const wsBase = httpUrl.replace(/^http/, 'ws').replace(/\/api\/v1\/?$/, '');
   const wsUrl = `${wsBase}/ws/admin-feed`;
   

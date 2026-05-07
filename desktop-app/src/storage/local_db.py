@@ -1,24 +1,12 @@
-"""
-Local Database — SQLite Storage
-ONE ROW PER SESSION for abnormalities (mirrors Supabase schema)
-
-Abnormality storage contract:
-  - upsert_session_abnormality() is the ONLY write method for abnormalities.
-  - It does INSERT OR REPLACE based on session_id (UNIQUE constraint).
-  - The full detections dict, overall_severity, and confidence are stored.
-  - get_session_abnormality(session_id) returns the single row (or None).
-  - get_unsynced_abnormalities() returns rows where synced=0.
-  - mark_abnormality_synced(session_id) flips synced=1 after backend push.
-
-This mirrors the Supabase design exactly so the SyncClient can do a
-simple 1:1 push — one local row becomes one backend UPSERT call.
-"""
+import logging
 import sqlite3
 import json
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict
 import uuid
+
+logger = logging.getLogger(__name__)
 
 
 class LocalDB:
@@ -37,18 +25,14 @@ class LocalDB:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
-    # ─────────────────────────────────────────────────────────
-    # CONNECTION
-    # ─────────────────────────────────────────────────────────
+    # Connection
 
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         return conn
 
-    # ─────────────────────────────────────────────────────────
-    # SCHEMA
-    # ─────────────────────────────────────────────────────────
+    # Schema
 
     def _init_db(self):
         conn = self._get_connection()
@@ -118,9 +102,7 @@ class LocalDB:
         conn.commit()
         conn.close()
 
-    # ─────────────────────────────────────────────────────────
-    # SESSIONS
-    # ─────────────────────────────────────────────────────────
+    # Sessions
 
     def create_session(
         self,
@@ -186,7 +168,7 @@ class LocalDB:
         cursor.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
         conn.commit()
         conn.close()
-        print(f"  🗑️ Deleted local session {session_id[:8]}... and related records")
+        logger.info(f"Deleted local session {session_id[:8]}... and related records")
     def update_session(
         self,
         session_id: str,
@@ -230,9 +212,7 @@ class LocalDB:
         conn.close()
         return [dict(r) for r in rows]
 
-    # ─────────────────────────────────────────────────────────
-    # WORK LOGS
-    # ─────────────────────────────────────────────────────────
+    # Work logs
 
     def create_work_log(
         self,
@@ -273,9 +253,7 @@ class LocalDB:
         conn.close()
         return [dict(r) for r in rows]
 
-    # ─────────────────────────────────────────────────────────
-    # ABNORMALITIES — one row per session, upserted
-    # ─────────────────────────────────────────────────────────
+    # Abnormalities — one row per session, upserted
 
     def upsert_session_abnormality(
         self,
@@ -368,7 +346,7 @@ class LocalDB:
         conn.commit()
         conn.close()
 
-    # ─── Legacy compatibility shims ──────────────────────────
+    # Legacy compatibility shims
     # Kept so nothing breaks if old call sites exist.
 
     def get_session_abnormalities(self, session_id: str) -> List[Dict]:
@@ -384,9 +362,7 @@ class LocalDB:
         conn.commit()
         conn.close()
 
-    # ─────────────────────────────────────────────────────────
-    # SYNC QUEUE (for sessions / work_logs — not abnormalities)
-    # ─────────────────────────────────────────────────────────
+    # Sync Queue (for sessions / work_logs — not abnormalities)
 
     def add_to_sync_queue(self, operation_type: str, table_name: str,
                           record_id: str, payload: Dict):

@@ -1,45 +1,24 @@
 """
 Analytics Service
-
-Handles complex analytics calculations for productivity metrics,
-trends, and insights.
-
-TODO: Implement advanced analytics features:
-- Productivity score calculation
-- Work pattern analysis
-- Trend detection
-- Anomaly prediction
-- Department comparisons
+Handles complex analytics calculations for productivity metrics, trends, and insights.
+Not yet wired to any API route — see todos.md for implementation notes.
 """
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
 
 
 class AnalyticsService:
-    """Service for analytics and productivity calculations"""
-    
+    """Service for analytics and productivity calculations."""
+
     @staticmethod
-    async def calculate_productivity_score(
-        session_id: str,
-        db: AsyncSession
-    ) -> float:
+    async def calculate_productivity_score(session_id: str, db: AsyncSession) -> float:
         """
-        Calculate productivity score for a session
-        
-        TODO: Implement based on:
-        - Work time vs break time ratio
-        - Input consistency
-        - Abnormality count
-        - Time of day patterns
-        
-        Returns:
-            float: Score between 0-100
+        Calculate a productivity score (0–100) for a session.
+        Factors: work/break ratio, input consistency, abnormality count, time-of-day.
         """
-        # Placeholder implementation
         return 0.0
-    
+
     @staticmethod
     async def get_work_patterns(
         employee_id: str,
@@ -48,37 +27,19 @@ class AnalyticsService:
         db: AsyncSession
     ) -> Dict:
         """
-        Analyze work patterns for an employee
-        
-        TODO: Return heatmap data showing:
-        - Peak productivity hours
-        - Most active days
-        - Break patterns
-        - Focus time windows
+        Return heatmap data for an employee: peak hours, most active days,
+        break patterns, and focus time windows.
         """
-        # Placeholder implementation
-        return {
-            "hourly_activity": {},
-            "daily_averages": {},
-            "peak_hours": []
-        }
-    
+        return {"hourly_activity": {}, "daily_averages": {}, "peak_hours": []}
+
     @staticmethod
-    async def detect_trends(
-        employee_id: str,
-        db: AsyncSession
-    ) -> List[Dict]:
+    async def detect_trends(employee_id: str, db: AsyncSession) -> List[Dict]:
         """
-        Detect productivity trends
-        
-        TODO: Identify:
-        - Improving/declining performance
-        - Burnout indicators
-        - Optimal work schedules
+        Identify improving/declining performance, burnout indicators,
+        and optimal work schedules over time.
         """
-        # Placeholder implementation
         return []
-    
+
     @staticmethod
     async def compare_departments(
         department_a: str,
@@ -86,28 +47,7 @@ class AnalyticsService:
         db: AsyncSession
     ) -> Dict:
         """
-        Compare productivity metrics between departments
-        
-        TODO: Compare:
-        - Average session quality
-        - Abnormality rates
-        - Break compliance
-        - Work hours distribution
+        Compare average session quality, abnormality rates, break compliance,
+        and work hours distribution between two departments.
         """
-        # Placeholder implementation
-        return {
-            "department_a": {},
-            "department_b": {},
-            "differences": {}
-        }
-
-
-# Example usage in API route:
-# 
-# @router.get("/analytics/productivity/{session_id}")
-# async def get_session_productivity(
-#     session_id: str,
-#     db: AsyncSession = Depends(get_db)
-# ):
-#     score = await AnalyticsService.calculate_productivity_score(session_id, db)
-#     return {"session_id": session_id, "productivity_score": score}
+        return {"department_a": {}, "department_b": {}, "differences": {}}

@@ -1,7 +1,11 @@
 import asyncio
 import smtplib
+import logging
 from email.message import EmailMessage
+from email.utils import formataddr
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 def _get_base_template(title: str, content: str, color: str = "#0f172a") -> str:
     """Provides a highly formal, corporate HTML email shell."""
@@ -47,12 +51,22 @@ def _get_base_template(title: str, content: str, color: str = "#0f172a") -> str:
 def _send_email_sync(to_email: str, subject: str, html_body: str):
     """Synchronous core wrapped by asyncio.to_thread"""
     if not settings.SMTP_HOST or not settings.SMTP_USER:
-        print(f"[MAILER WARNING] SMTP not configured in .env. Skipping email to {to_email}.")
+        logger.warning(f"SMTP not configured — skipping email to {to_email}")
         return
 
     msg = EmailMessage()
     msg['Subject'] = subject
-    msg['From'] = settings.SMTP_FROM_EMAIL or settings.SMTP_USER
+    
+    # Forcefully format the display name to "trick" Gmail into keeping it
+    display_name = "Sentinel Work Integrity System"
+    if "<" in settings.SMTP_FROM_EMAIL:
+        # If the name is already in the .env, try to extract it
+        import re
+        match = re.search(r'^(.*?)\s*<(.*)>$', settings.SMTP_FROM_EMAIL)
+        if match:
+            display_name = match.group(1).strip()
+    
+    msg['From'] = formataddr((display_name, settings.SMTP_USER))
     msg['To'] = to_email
     msg.add_alternative(html_body, subtype='html')
 
@@ -61,9 +75,9 @@ def _send_email_sync(to_email: str, subject: str, html_body: str):
             server.starttls()
             server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
             server.send_message(msg)
-            print(f"[MAILER SUCCESS] Official email dispatched to {to_email} (Subject: '{subject}')")
+            logger.info(f"Email dispatched to {to_email} — subject: '{subject}'")
     except Exception as e:
-        print(f"[MAILER ERROR] Failed to send email to {to_email}. Error: {str(e)}")
+        logger.error(f"Failed to send email to {to_email}: {e}")
 
 
 async def send_task_assignment(employee_email: str, employee_name: str, task_title: str, priority: str):
@@ -125,9 +139,12 @@ async def send_flag_escalation(employee_email: str, employee_name: str, note: st
         <p>A senior Human Resources representative will contact you shortly to schedule a formal review of this incident.</p>
     """
     html = _get_base_template("Formal Incident Escalation", content, color="#dc2626")
-    
-    # Send to Employee
+
     await asyncio.to_thread(_send_email_sync, employee_email, subject, html)
-    # Send to HR (if different)
-    if hr_email and hr_email != employee_email:
-        await asyncio.to_thread(_send_email_sync, hr_email, subject, html)
+    
+    if hr_email:
+        # Support multiple HR emails separated by commas
+        hr_list = [e.strip() for e in hr_email.split(",") if e.strip()]
+        for hr in hr_list:
+            if hr != employee_email:
+                await asyncio.to_thread(_send_email_sync, hr, subject, html)

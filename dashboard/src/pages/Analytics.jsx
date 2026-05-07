@@ -52,7 +52,7 @@ export default function Analytics() {
     }).catch(() => {}).finally(() => setLoading(false))
   }, [])
 
-  // ── Filter sessions by period ──────────────────────────────
+  // Filter sessions by period
   const filteredSessions = useMemo(() => {
     const p = PERIODS.find(p => p.key === period)
     if (!p.days) return sessions
@@ -84,7 +84,7 @@ export default function Analytics() {
     })
   }, [flags, period])
 
-  // ── Department stats ───────────────────────────────────────
+  // Aggregate department statistics
   const deptStats = useMemo(() => {
     const map = {}
     employees.forEach(e => {
@@ -104,7 +104,7 @@ export default function Analytics() {
     })).sort((a, b) => b.avgWork - a.avgWork)
   }, [employees, filteredSessions])
 
-  // ── Top performers ─────────────────────────────────────────
+  // Identify top performers
   const topWorkers = useMemo(() => {
     const map = {}
     employees.forEach(e => { map[e.id] = { ...e, totalWork: 0, sessionCount: 0 } })
@@ -118,7 +118,7 @@ export default function Analytics() {
       .sort((a, b) => b.totalWork - a.totalWork).slice(0, 5)
   }, [employees, filteredSessions])
 
-  // ── Highest Risk Employees ──────────────────────────────────
+  // High risk identification
   const riskWorkers = useMemo(() => {
     const map = {}
     employees.forEach(e => { map[e.id] = { ...e, totalRisk: 0, sessionCount: 0 } })
@@ -133,7 +133,7 @@ export default function Analytics() {
       .sort((a, b) => b.avgRisk - a.avgRisk).slice(0, 5)
   }, [employees, filteredSessions])
 
-  // ── Daily sessions trend ──────────────────────────────────
+  // Daily session activity trends
   const dailyTrend = useMemo(() => {
     const days = period === 'week' ? 7 : period === 'month' ? 30 : 14
     return Array.from({ length: days }, (_, i) => {
@@ -153,7 +153,7 @@ export default function Analytics() {
     })
   }, [filteredSessions, filteredFlags, period])
 
-  // ── Status distribution pie ────────────────────────────────
+  // Status breakdown distribution
   const statusDist = useMemo(() => [
     { name: 'Completed', value: filteredSessions.filter(s => s.status === 'completed').length, color: '#10b981' },
     { name: 'Active',    value: filteredSessions.filter(s => s.status === 'active').length,    color: '#22d3ee' },
@@ -162,7 +162,7 @@ export default function Analytics() {
     { name: 'Abandoned', value: filteredSessions.filter(s => s.status === 'abandoned').length, color: '#64748b' },
   ].filter(d => d.value > 0), [filteredSessions])
 
-  // ── Anomaly types ──────────────────────────────────────────
+  // Anomaly type frequency analysis
   const anomalyStats = useMemo(() => {
     const map = {}
     filteredFlags.forEach(f => {
@@ -177,7 +177,7 @@ export default function Analytics() {
       .slice(0, 5)
   }, [filteredFlags])
 
-  // ── Radar — org-level metrics ──────────────────────────────
+  // Organization-level health metrics radar
   const radarData = useMemo(() => {
     const total    = filteredSessions.length
     const done     = filteredSessions.filter(s => s.status === 'completed').length
@@ -194,7 +194,7 @@ export default function Analytics() {
     ]
   }, [filteredSessions, filteredFlags])
 
-  // ── Summary stats ──────────────────────────────────────────
+  // Final summary statistics calculation
   const totalWorkMins   = filteredSessions.reduce((a, s) => a + (s.total_work_minutes || 0), 0)
   const completionRate  = filteredSessions.length
     ? Math.round(filteredSessions.filter(s => s.status === 'completed').length / filteredSessions.length * 100) : 0

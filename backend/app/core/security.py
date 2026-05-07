@@ -142,6 +142,23 @@ async def get_current_user_role(
     return role
 
 
+async def get_current_user_email(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+) -> str:
+    """Get current user's email from token"""
+    token = credentials.credentials
+    payload = decode_token(token)
+    
+    email: str = payload.get("email")
+    if email is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials"
+        )
+    
+    return email
+
+
 def require_role(required_role: str):
     """
     Dependency to require specific user role

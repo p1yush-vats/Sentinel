@@ -1,6 +1,6 @@
 """
-Quick script to end all active sessions in database
-Run from desktop-app directory: python cleanup_sessions.py
+Utility script: interactively ends any active session for a given account.
+Run from the project root: python -m app.api.cleanup_sessions
 """
 import httpx
 

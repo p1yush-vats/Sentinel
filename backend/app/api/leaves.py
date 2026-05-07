@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 from ..core.database import get_db
-from ..core.security import get_current_user_id, RoleChecker
+from ..core.security import get_current_user_id, RoleChecker, get_current_user_email
 from ..models.leave import Leave
 from ..models.employee import Employee
 from .audit_log import write_audit
@@ -136,6 +136,7 @@ async def review_leave(
     review:   LeaveReview,
     background_tasks: BackgroundTasks,
     admin_id: str = Depends(get_current_user_id),
+    admin_email: str = Depends(get_current_user_email),
     db:       AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(Leave).where(Leave.id == leave_id))
@@ -146,6 +147,11 @@ async def review_leave(
         raise HTTPException(status_code=400, detail="Leave already reviewed or not pending")
     if review.status not in ('approved', 'rejected', 'needs_info'):
         raise HTTPException(status_code=400, detail="Status must be approved, rejected, or needs_info")
+
+    employee = await db.scalar(select(Employee).where(Employee.id == leave.employee_id))
+    if admin_email == "demo-admin@sentinel.com":
+        if employee and not employee.email.startswith("demo-"):
+            raise HTTPException(status_code=403, detail="Demo accounts cannot process real leaves")
 
     leave.status         = review.status
     leave.admin_response = review.admin_response
@@ -169,7 +175,6 @@ async def review_leave(
         metadata={"leave_id": leave_id, "decision": review.status, "leave_type": leave.leave_type})
     await db.commit()
 
-    employee = await db.scalar(select(Employee).where(Employee.id == leave.employee_id))
     if employee:
         background_tasks.add_task(send_leave_decision, employee.email, employee.full_name, review.status, review.admin_response)
 

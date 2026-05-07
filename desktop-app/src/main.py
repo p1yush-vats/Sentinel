@@ -1,7 +1,4 @@
-"""
-main.py — SENTINEL Desktop App
-Entry point. Wires SentinelApp into UI.
-"""
+import logging
 import sys
 import asyncio
 from pathlib import Path
@@ -15,6 +12,14 @@ import httpx
 import ctypes
 import pystray
 from PIL import Image
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger("sentinel")
 
 try:
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("sentinel.desktop.app.1.0")
@@ -34,6 +39,7 @@ from sync.sync_client             import SyncClient
 from detection.input_collector    import InputCollector
 from detection.abnormality_detector   import AbnormalityDetector, Abnormality
 from detection.abnormality_aggregator import AbnormalityAggregator
+from utils.assets import ICO_PATH, set_window_icon
 import customtkinter as ctk
 
 IST = pytz.timezone("Asia/Kolkata")
@@ -48,17 +54,8 @@ A_BG = "#1A1400";  A_BD = "#3B2C00"
 R_BG = "#1A0D0D";  R_BD = "#3B1010"
 
 
-def _asset(filename: str) -> Path:
-    return Path(__file__).parent.parent / "assets" / "iso" / filename
-
-
-def _set_icon(window) -> None:
-    ico = _asset("sentinel.ico")
-    if ico.exists():
-        try:
-            window.iconbitmap(str(ico))
-        except Exception:
-            pass
+# Use the standardized helper from utils.assets
+# (helpers removed here to avoid duplication)
 
 
 def now_ist():
@@ -114,57 +111,63 @@ class SentinelApp:
         self._logout_pending: bool = False
         
         self.tray_icon = None
-        self._setup_tray()
+        # Tray is set up after the first window is visible (see run())
 
     def _setup_tray(self):
-        ico_path = _asset("sentinel.ico")
-        if not ico_path.exists():
+        if not ICO_PATH.exists():
             return
         try:
-            image = Image.open(str(ico_path))
+            image = Image.open(str(ICO_PATH))
             menu = pystray.Menu(
                 pystray.MenuItem("Show Sentinel", self._on_tray_show, default=True),
                 pystray.MenuItem("Exit Sentinel", self._on_tray_exit)
             )
             self.tray_icon = pystray.Icon("Sentinel", image, "Sentinel", menu)
+            # Add a dedicated click handler for double-click/default action
+            self.tray_icon.on_activate = self._on_tray_show
             threading.Thread(target=self.tray_icon.run, daemon=True).start()
         except Exception as e:
-            print(f"Tray error: {e}")
+            logger.error(f"Tray error: {e}")
 
-    def _on_tray_show(self, icon, item):
+    def _on_tray_show(self, icon=None, item=None):
+        logger.info("Tray: Showing Sentinel...")
+        def _show():
+            target = self.main_window or self.login_window
+            if target:
+                target.deiconify()
+                target.focus_force()
+                target.state('normal')
+                target.lift()
+        
+        # Try both direct and after() for maximum responsiveness across threads
         if self.main_window:
-            self.main_window.after(0, self.main_window.deiconify)
-            self.main_window.after(0, self.main_window.lift)
+            self.main_window.after(0, _show)
         elif self.login_window:
-            self.login_window.after(0, self.login_window.deiconify)
-            self.login_window.after(0, self.login_window.lift)
+            self.login_window.after(0, _show)
 
-    def _on_tray_exit(self, icon, item):
-        import sys
-        if self.tray_icon:
-            self.tray_icon.stop()
-        if self.main_window:
-            self.main_window.after(0, self.main_window.quit)
-        elif self.login_window:
-            self.login_window.after(0, self.login_window.destroy)
-        else:
-            sys.exit(0)
+    def _on_tray_exit(self, icon=None, item=None):
+        import os
+        logger.info("Tray exit: terminating Sentinel...")
+        # Don't call self.tray_icon.stop() — it blocks inside the tray thread
+        # causing a deadlock before os._exit() can fire.
+        os._exit(0)
 
     # ─────────────────────────────────────────────────────────
     def run(self):
-        print("=" * 50)
-        print("  SENTINEL Desktop App v1.0.0")
-        print(f"  API: {Config.API_BASE_URL}")
-        print(f"  DB : {Config.DB_PATH}")
-        print("=" * 50)
+        logger.info("=" * 50)
+        logger.info("  SENTINEL Desktop App v1.0.0")
+        logger.info(f"  API: {Config.API_BASE_URL}")
+        logger.info(f"  DB : {Config.DB_PATH}")
+        logger.info("=" * 50)
 
         if self.jwt_handler.has_saved_tokens() and self.jwt_handler.is_token_valid():
             self.user         = self.jwt_handler.get_user_data()
             self.access_token = self.jwt_handler.get_access_token()
             if self.user and self.access_token and "id" in self.user:
                 try:
-                    print(f"Auto-login: {self.user.get('full_name')} ({self.user.get('role')})")
+                    logger.info(f"Auto-login: {self.user.get('full_name')} ({self.user.get('role')})")
                     self._init_components()
+                    self._setup_tray()
                     incomplete = self._check_incomplete_session()
                     if incomplete:
                         self._session_recovery_dialog(incomplete)
@@ -172,12 +175,13 @@ class SentinelApp:
                         self._show_main()
                     return
                 except Exception as e:
-                    print(f"Auto-login error: {e}")
+                    logger.error(f"Auto-login error: {e}")
                     import traceback; traceback.print_exc()
                     self.jwt_handler.clear_tokens()
             else:
                 self.jwt_handler.clear_tokens()
 
+        self._setup_tray()
         self._show_login()
 
     # ─────────────────────────────────────────────────────────
@@ -189,13 +193,13 @@ class SentinelApp:
             start = parse_datetime_ist(session["start_time"])
             age   = now_ist() - start
             if age < timedelta(hours=Config.SESSION_RECOVERY_WINDOW_HOURS):
-                print(f"Found incomplete session from {int(age.total_seconds()//60)} min ago")
+                logger.info(f"Found incomplete session from {int(age.total_seconds()//60)} min ago")
                 return session
             self.local_db.update_session(session_id=session["id"],
                                           status="abandoned", end_time=now_ist())
             return None
         except Exception as e:
-            print(f"Error checking incomplete session: {e}")
+            logger.error(f"Error checking incomplete session: {e}")
             return None
 
     def _session_recovery_dialog(self, session: dict):
@@ -208,7 +212,7 @@ class SentinelApp:
         dlg.resizable(False, False)
         dlg.configure(fg_color=BG1)
         dlg.attributes("-topmost", True)
-        _set_icon(dlg)
+        set_window_icon(dlg)
         dlg.update_idletasks()
         sw, sh = dlg.winfo_screenwidth(), dlg.winfo_screenheight()
         dlg.geometry(f"540x320+{(sw-540)//2}+{(sh-320)//2}")
@@ -285,22 +289,27 @@ class SentinelApp:
             pass
         self.login_window = None
 
-    def _on_login_success(self, user: dict, access_token: str):
-        self.user         = user
+    def _on_login_success(self, user, access_token):
+        self.user = user
         self.access_token = access_token
-        self.jwt_handler.save_tokens(access_token=access_token, refresh_token="", user_data=user)
-        print(f"Login OK: {user.get('full_name')} ({user.get('role')})")
-        self._init_components()
-        # Withdraw login window before opening main — prevents image binding issues
+        self.jwt_handler.save_tokens(
+            access_token=access_token,
+            refresh_token=access_token, # backend uses same for now
+            user_data=user
+        )
         if self.login_window:
-            try:
-                self.login_window.withdraw()
-            except Exception:
-                pass
+            self.login_window.destroy()
+            self.login_window = None
+
+        # Resolve pyimage conflict by clearing cache before creating MainWindow root
+        from utils import assets
+        assets.clear_cache()
+
+        self._init_components()
         self._show_main()
 
     def _logout(self):
-        print("Logging out…")
+        logger.info("Logging out…")
         self._stop_detection()
         if self.sync_client:
             self.sync_client.stop_background_flush()
@@ -330,7 +339,7 @@ class SentinelApp:
                 pass
 
     def _init_components(self):
-        print("Initializing components…")
+        logger.info("Initializing components…")
         self.session_manager = SessionManager(
             api_base_url=Config.API_BASE_URL,
             access_token=self.access_token,
@@ -340,6 +349,11 @@ class SentinelApp:
         )
         self.session_manager.on_alert_received = self._on_alert_received
         self.session_manager.on_task_received  = self._on_task_received
+        self.session_manager.on_team_chat      = self._on_ws_team_chat
+        self.session_manager.on_direct_message = self._on_ws_direct_message
+        self.session_manager.on_typing         = self._on_ws_typing
+        self.session_manager.on_presence       = self._on_ws_presence
+        self.session_manager.on_pin_update     = self._on_ws_pin_update
         self.sync_client = SyncClient(
             api_base_url=Config.API_BASE_URL,
             access_token=self.access_token,
@@ -356,7 +370,7 @@ class SentinelApp:
             on_abnormality_detected=self._on_abnormality_detected,
             confidence_threshold=Config.ABNORMALITY_CONFIDENCE_THRESHOLD
         )
-        print("Components ready.")
+        logger.info("Components ready.")
 
     def _on_alert_received(self, data: dict):
         if self.main_window:
@@ -381,11 +395,92 @@ class SentinelApp:
             # Refresh Tasks tab list
             self.main_window.after(0, lambda: self.main_window.refresh_tasks())
 
+    def _on_ws_team_chat(self, data: dict):
+        msg = data.get("message", {})
+        sender_id = msg.get("sender_id")
+        
+        # 1. Trigger OS Toast and in-app banner for mentions
+        if sender_id != self.user["id"]:
+            content = msg.get("content", "")
+            me_full = self.user.get("full_name", "")
+            me_first = me_full.split()[0] if me_full else ""
+            
+            is_mention = False
+            if me_full and f"@{me_full.lower()}" in content.lower():
+                is_mention = True
+            elif me_first and f"@{me_first.lower()}" in content.lower():
+                is_mention = True
+                
+            if is_mention and self.main_window:
+                self.main_window.after(0, lambda: self.main_window.notifier.send(
+                    f"Mentioned by {msg.get('sender_name')} 👥", content, severity="info"
+                ))
+                self.main_window.after(0, lambda: self.main_window.show_banner(
+                    f"Mention in Chat: {msg.get('sender_name')}: {content}", severity="info", duration_ms=6000
+                ))
+                
+        # 2. Forward to active TeamView widget
+        if self.main_window and getattr(self.main_window, "team_view_widget", None):
+            self.main_window.after(0, lambda: self.main_window.team_view_widget.handle_ws_team_chat(data))
+
+    def _on_ws_direct_message(self, data: dict):
+        msg = data.get("message", {})
+        sender_id = msg.get("sender_id")
+        
+        # 1. Trigger OS Toast and in-app banner if DM is not currently open/focused
+        dm_open = False
+        if self.main_window and getattr(self.main_window, "team_view_widget", None):
+            team_view = self.main_window.team_view_widget
+            if sender_id in team_view.active_dm_windows:
+                dm_open = True
+                
+        if sender_id != self.user["id"] and not dm_open:
+            content = msg.get("content", "")
+            if self.main_window:
+                self.main_window.after(0, lambda: self.main_window.notifier.send(
+                    f"New DM from {msg.get('sender_name')} ✉", content, severity="info"
+                ))
+                self.main_window.after(0, lambda: self.main_window.show_banner(
+                    f"Direct Message: {msg.get('sender_name')}: {content}", severity="info", duration_ms=6000
+                ))
+                
+        # 2. Forward to active DM window or refresh directory counts
+        if self.main_window and getattr(self.main_window, "team_view_widget", None):
+            team_view = self.main_window.team_view_widget
+            if sender_id in team_view.active_dm_windows:
+                dm_win = team_view.active_dm_windows[sender_id]
+                self.main_window.after(0, lambda: dm_win.handle_ws_dm(data))
+            else:
+                self.main_window.after(0, lambda: team_view.refresh_all())
+
+    def _on_ws_typing(self, data: dict):
+        if not self.main_window or not getattr(self.main_window, "team_view_widget", None):
+            return
+            
+        team_view = self.main_window.team_view_widget
+        target = data.get("target")
+        user_id = data.get("user_id")
+        
+        if target == "department":
+            self.main_window.after(0, lambda: team_view.handle_ws_typing(data))
+        elif target == self.user["id"] and user_id in team_view.active_dm_windows:
+            dm_win = team_view.active_dm_windows[user_id]
+            self.main_window.after(0, lambda: dm_win.handle_ws_typing(data))
+
+    def _on_ws_presence(self, data: dict):
+        if self.main_window and getattr(self.main_window, "team_view_widget", None):
+            self.main_window.after(0, lambda: self.main_window.team_view_widget.handle_ws_presence(data))
+
+    def _on_ws_pin_update(self, data: dict):
+        if self.main_window and getattr(self.main_window, "team_view_widget", None):
+            self.main_window.after(0, lambda: self.main_window.team_view_widget.handle_ws_pin_update(data))
+
     def _show_main(self):
         self.main_window = MainWindow(
             user=self.user,
             access_token=self.access_token,
-            time_engine=self.session_manager.time_engine
+            time_engine=self.session_manager.time_engine,
+            session_manager=self.session_manager
         )
         self.main_window.on_start_session = self._start_session
         self.main_window.on_end_session   = self._end_session
@@ -474,7 +569,7 @@ class SentinelApp:
                 self._start_detection()
 
             except Exception as e:
-                print(f"Session start error: {e}")
+                logger.error(f"Session start error: {e}")
                 import traceback; traceback.print_exc()
 
         threading.Thread(target=_run, daemon=True).start()
@@ -492,13 +587,13 @@ class SentinelApp:
             self.abnormality_aggregator.flush()
             summary = self.abnormality_aggregator.get_summary()
             if summary:
-                print(f"Abnormality summary: {len(summary)} type(s)")
+                logger.info(f"Abnormality summary: {len(summary)} type(s)")
             self.abnormality_aggregator = None
 
         try:
             self.sync_client.sync_now()
         except Exception as e:
-            print(f"Final sync error: {e}")
+            logger.error(f"Final sync error: {e}")
 
         def _run():
             try:
@@ -530,7 +625,7 @@ class SentinelApp:
                 self.sync_client.stop_background_flush()
 
             except Exception as e:
-                print(f"Session end error: {e}")
+                logger.error(f"Session end error: {e}")
                 import traceback; traceback.print_exc()
 
         threading.Thread(target=_run, daemon=True).start()
@@ -547,7 +642,7 @@ class SentinelApp:
             self._break_segment_start = now_ist()
             self._stop_detection()
         except Exception as e:
-            print(f"Break error: {e}")
+            logger.error(f"Break error: {e}")
 
     def _end_break(self):
         try:
@@ -559,7 +654,7 @@ class SentinelApp:
             self._work_segment_start = now_ist()
             self._start_detection()
         except Exception as e:
-            print(f"End break error: {e}")
+            logger.error(f"End break error: {e}")
 
     def _take_lunch(self):
         try:
@@ -570,7 +665,7 @@ class SentinelApp:
             self._lunch_segment_start = now_ist()
             self._stop_detection()
         except Exception as e:
-            print(f"Lunch error: {e}")
+            logger.error(f"Lunch error: {e}")
 
     def _end_lunch(self):
         try:
@@ -581,7 +676,7 @@ class SentinelApp:
             self._work_segment_start = now_ist()
             self._start_detection()
         except Exception as e:
-            print(f"End lunch error: {e}")
+            logger.error(f"End lunch error: {e}")
 
     # ─────────────────────────────────────────────────────────
     # DETECTION
@@ -594,14 +689,14 @@ class SentinelApp:
         self.detection_task = threading.Thread(
             target=self._detection_loop, daemon=True)
         self.detection_task.start()
-        print("Detection pipeline started")
+        logger.info("Detection pipeline started")
 
     def _stop_detection(self):
         if not self.detection_running:
             return
         self.detection_running = False
         self.input_collector.stop_collecting()
-        print("Detection pipeline stopped")
+        logger.info("Detection pipeline stopped")
 
     def _detection_loop(self):
         interval = 30
@@ -655,16 +750,16 @@ class SentinelApp:
                                 self.main_window.after(0, lambda ts=t:
                                     self.main_window.set_sync_status(True, ts))
                         except Exception as e:
-                            print(f"Session sync error: {e}")
+                            logger.error(f"Session sync error: {e}")
                     threading.Thread(target=_sync, daemon=True).start()
 
             except Exception as e:
-                print(f"Detection loop error: {e}")
+                logger.error(f"Detection loop error: {e}")
                 import traceback; traceback.print_exc()
 
             time.sleep(interval)
 
-        print("Detection loop stopped")
+        logger.info("Detection loop stopped")
 
     # ─────────────────────────────────────────────────────────
     # CALLBACKS
@@ -676,13 +771,13 @@ class SentinelApp:
 
     def _on_sync_complete(self, summary: dict):
         n = summary.get("sessions_synced", 0) + summary.get("abnormalities_synced", 0)
-        print(f"Sync complete — {n} record(s)")
+        logger.info(f"Sync complete — {n} record(s)")
         if self.main_window:
             ts = now_ist().strftime("%I:%M %p")
             self.main_window.after(0, lambda t=ts: self.main_window.set_sync_status(True, t))
 
     def _on_sync_error(self, error: str):
-        print(f"Sync error: {error}")
+        logger.error(f"Sync error: {error}")
         if self.main_window:
             ts = now_ist().strftime("%I:%M %p")
             self.main_window.after(0, lambda t=ts: self.main_window.set_sync_status(False, t))
@@ -773,9 +868,9 @@ class SentinelApp:
                     log_type=log_type, start_time=start, end_time=end,
                     duration_minutes=duration, break_token_used=break_token_used))
                 loop.close()
-                print(f"Work log saved: {log_type} ({duration} min)")
+                logger.info(f"Work log saved: {log_type} ({duration} min)")
             except Exception as e:
-                print(f"Work log error: {e}")
+                logger.error(f"Work log error: {e}")
         threading.Thread(target=_send, daemon=True).start()
 
     def _accumulate_hourly(self, activity: dict):
@@ -828,7 +923,7 @@ class SentinelApp:
         dlg.configure(fg_color=BG1)
         dlg.transient(self.main_window)
         dlg.grab_set()
-        _set_icon(dlg)
+        set_window_icon(dlg)
         dlg.update_idletasks()
         dlg.geometry(f"500x290+{(dlg.winfo_screenwidth()-500)//2}+{(dlg.winfo_screenheight()-290)//2}")
 

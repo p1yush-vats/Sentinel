@@ -1,21 +1,4 @@
-"""
-Sync Client — DUAL LAYER, CLEAN DESIGN
-
-Layer 1 (ALWAYS):   AbnormalityAggregator writes to SQLite on every detection.
-                    No internet needed. Never fails silently.
-
-Layer 2 (INTERVAL): This background thread wakes every SYNC_INTERVAL_SECONDS,
-                    reads all unsynced SQLite records, and pushes them to
-                    Supabase. One HTTP call per session (UPSERT on backend).
-                    If backend is offline → record stays synced=0 → retried
-                    on the next cycle. Nothing is lost.
-
-Key rules enforced here:
-  - NO inline HTTP calls from the aggregator or detection thread.
-  - ONE HTTP call per unsynced abnormality record (which = 1 per session).
-  - Background thread owns its own asyncio event loop (created fresh each cycle).
-  - report_abnormality() is a no-op kept for interface compatibility.
-"""
+import logging
 import httpx
 import asyncio
 import threading
@@ -24,6 +7,8 @@ from datetime import datetime
 from typing import Optional, Callable, Dict, List
 
 from storage.local_db import LocalDB
+
+logger = logging.getLogger(__name__)
 
 
 class SyncClient:
@@ -75,12 +60,12 @@ class SyncClient:
 
     def _mark_backend_online(self):
         if not self.backend_online:
-            print("  🟢 Backend back online — resuming sync")
+            logger.info("Backend back online — resuming sync")
         self.backend_online = True
 
     def _mark_backend_offline(self, reason: str = ""):
         if self.backend_online:
-            print(f"  🔴 Backend offline — working locally ({reason})")
+            logger.warning(f"Backend offline — working locally ({reason})")
         self.backend_online = False
 
     # ─────────────────────────────────────────────────────────
@@ -98,7 +83,7 @@ class SyncClient:
             name="sentinel-sync-flush"
         )
         self._flush_thread.start()
-        print(f"  ✓ Background flush started (every {self.sync_interval_seconds}s)")
+        logger.info(f"Background flush started (every {self.sync_interval_seconds}s)")
 
     def stop_background_flush(self):
         """Signal the background thread to stop after its current sleep."""
@@ -113,7 +98,7 @@ class SyncClient:
             try:
                 self._run_flush_cycle()
             except Exception as e:
-                print(f"  ⚠️ Flush cycle error: {e}")
+                logger.error(f"Flush cycle error: {e}")
                 self.sync_errors.append(f"Flush cycle: {e}")
 
     def _run_flush_cycle(self):
@@ -129,7 +114,7 @@ class SyncClient:
             return
 
         total = len(unsynced_sessions) + len(unsynced_abnormalities)
-        print(f"\n🔄 Flush cycle: {total} record(s) to sync "
+        logger.info(f"Flush cycle: {total} record(s) to sync "
               f"({len(unsynced_sessions)} sessions, "
               f"{len(unsynced_abnormalities)} abnormality records)")
 
@@ -151,20 +136,14 @@ class SyncClient:
                         failed_count += 1
                 except Exception as e:
                     failed_count += 1
-                    print(f"  ⚠️ Session flush error: {e}")
+                    logger.error(f"Session flush error: {e}")
 
             # 2. Push abnormality records (one per session)
             for abn in unsynced_abnormalities:
                 try:
                     local_session = self.local_db.get_session(abn["session_id"])
                     if not local_session or not local_session.get("backend_session_id"):
-                        # Orphaned record — the local session never got a backend ID
-                        # (e.g. created before a bug fix). It can never be synced
-                        # against Supabase because we have no server session to attach
-                        # it to. Mark it done so it doesn't loop forever.
-                        print(f"  ⚠️  Orphaned abnormality for session "
-                              f"{abn['session_id'][:8]}... — no backend session ID. "
-                              f"Marking as skipped.")
+                        logger.warning(f"Orphaned abnormality for session {abn['session_id'][:8]}... — no backend session ID. Marking as skipped.")
                         self.local_db.mark_abnormality_synced(abn["session_id"])
                         failed_count += 1
                         continue
@@ -185,18 +164,16 @@ class SyncClient:
                     if success:
                         synced_count += 1
                         self.local_db.mark_abnormality_synced(abn["session_id"])
-                        print(f"  ✅ Synced abnormality record for session "
-                              f"{abn['session_id'][:8]}... "
-                              f"[{abn['overall_severity']}]")
+                        logger.info(f"Synced abnormality record for session {abn['session_id'][:8]}... [{abn['overall_severity']}]")
                     else:
                         failed_count += 1
 
                 except Exception as e:
                     failed_count += 1
-                    print(f"  ⚠️ Abnormality flush error: {e}")
+                    logger.error(f"Abnormality flush error: {e}")
 
             self.last_sync_time = datetime.now()
-            print(f"  📊 Flush complete: {synced_count} synced, {failed_count} pending")
+            logger.info(f"Flush complete: {synced_count} synced, {failed_count} pending")
 
             if self.on_sync_complete and synced_count > 0:
                 self.on_sync_complete({
@@ -250,7 +227,7 @@ class SyncClient:
                         json=payload
                     )
 
-                    print(f"        📡 HTTP {response.status_code} [{abn_type}]")
+                    logger.debug(f"HTTP {response.status_code} [{abn_type}]")
 
                     if response.status_code in (200, 201):
                         self._mark_backend_online()
@@ -317,11 +294,11 @@ class SyncClient:
                 )
                 if response.status_code in (200, 404):
                     # 404 is fine — already gone
-                    print(f"  🗑️ Deleted backend session {backend_session_id[:8]}...")
+                    logger.info(f"Deleted backend session {backend_session_id[:8]}...")
                     self._mark_backend_online()
                     return True
                 else:
-                    print(f"  ⚠️ Failed to delete backend session: HTTP {response.status_code}")
+                    logger.error(f"Failed to delete backend session: HTTP {response.status_code}")
                     return False
 
         except httpx.ConnectError:
@@ -331,7 +308,7 @@ class SyncClient:
             self._mark_backend_offline("timeout")
             return False
         except Exception as e:
-            print(f"  ⚠️ Error deleting backend session: {e}")
+            logger.error(f"Error deleting backend session: {e}")
             return False
 
     def delete_session_now(self, backend_session_id: str) -> bool:
@@ -347,7 +324,7 @@ class SyncClient:
             loop.close()
             return result
         except Exception as e:
-            print(f"  ⚠️ delete_session_now error: {e}")
+            logger.error(f"delete_session_now error: {e}")
             return False
 
     # ─────────────────────────────────────────────────────────
@@ -360,11 +337,11 @@ class SyncClient:
         Called by main.py just before ending a session to guarantee
         all data is pushed before the app closes.
         """
-        print("\n🔄 Final sync before closing session...")
+        logger.info("Final sync before closing session...")
         try:
             self._run_flush_cycle()
         except Exception as e:
-            print(f"  ⚠️ Final sync error: {e}")
+            logger.error(f"Final sync error: {e}")
 
     async def sync_all(self):
         """Async version of sync_now (legacy compat)."""

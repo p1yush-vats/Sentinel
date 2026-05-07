@@ -34,6 +34,7 @@ Write-Host ""
     --include-package=sync `
     --include-package=utils `
     --include-data-files="..\\.env=.env" `
+    --include-data-dir="..\assets=assets" `
     --include-data-dir="..\venv\Lib\site-packages\customtkinter=customtkinter" `
     --output-filename=SENTINEL_PROD.exe `
     --output-dir="..\dist" `

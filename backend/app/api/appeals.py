@@ -8,8 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 from ..core.database import get_db
-from ..core.security import get_current_user_id, RoleChecker
+from ..core.security import get_current_user_id, RoleChecker, get_current_user_email
 from ..models.appeal import Appeal
+from ..models.employee import Employee
 from ..models.session import Session
 from .audit_log import write_audit
 
@@ -111,6 +112,7 @@ async def review_appeal(
     appeal_id: str,
     review:    AppealReview,
     admin_id:  str = Depends(get_current_user_id),
+    admin_email: str = Depends(get_current_user_email),
     db:        AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(Appeal).where(Appeal.id == appeal_id))
@@ -121,6 +123,11 @@ async def review_appeal(
         raise HTTPException(status_code=400, detail="Appeal already reviewed")
     if review.status not in ('approved', 'rejected'):
         raise HTTPException(status_code=400, detail="Status must be approved or rejected")
+
+    employee = await db.scalar(select(Employee).where(Employee.id == appeal.employee_id))
+    if admin_email == "demo-admin@sentinel.com":
+        if employee and not employee.email.startswith("demo-"):
+            raise HTTPException(status_code=403, detail="Demo accounts cannot process real appeals")
 
     appeal.status         = review.status
     appeal.admin_response = review.admin_response
