@@ -470,6 +470,7 @@ export default function MyTeam() {
 
       {/* ── Layout: Directory + Chat ── */}
       <div
+        className="myteam-grid"
         style={{
           display: 'grid',
           gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.4fr)',
@@ -846,7 +847,10 @@ export default function MyTeam() {
       {/* Responsive + animations */}
       <style>{`
         @media (max-width: 700px) {
-          .myteam-grid { grid-template-columns: 1fr !important; }
+          .myteam-grid {
+            grid-template-columns: 1fr !important;
+            gap: 16px !important;
+          }
         }
         @keyframes pulse {
           0%, 100% { opacity: 0.5; }
