@@ -287,7 +287,7 @@ export default function MyTeam() {
   // ── WebSocket connection ─────────────────────────────────────────────────
   useEffect(() => {
     if (!user?.id || !token) return
-    const wsBase = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1')
+    const wsBase = (import.meta.env.VITE_API_URL || 'https://sentinel-ny7w.onrender.com/api/v1')
       .replace(/^http/, 'ws')
       .replace(/\/api\/v1$/, '')
     const ws = new WebSocket(`${wsBase}/ws/${user.id}`)
