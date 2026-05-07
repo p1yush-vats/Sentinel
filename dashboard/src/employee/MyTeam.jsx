@@ -304,6 +304,14 @@ export default function MyTeam() {
         if (payload.type === 'team_chat' && payload.message) {
           setMessages((prev) => {
             if (prev.find((m) => m.id === payload.message.id)) return prev
+            if (payload.message.sender_id === user?.id) {
+              const optIndex = prev.findIndex(m => m.id.startsWith('opt-') && m.content === payload.message.content);
+              if (optIndex !== -1) {
+                const copy = [...prev];
+                copy[optIndex] = payload.message;
+                return copy;
+              }
+            }
             return [...prev, payload.message]
           })
         }
@@ -321,6 +329,14 @@ export default function MyTeam() {
         if (payload.type === 'direct_message' && payload.message) {
           setDmMessages(prev => {
             if (prev.find(m => m.id === payload.message.id)) return prev
+            if (payload.message.sender_id === user?.id) {
+              const optIndex = prev.findIndex(m => m.id.startsWith('opt-') && m.content === payload.message.content);
+              if (optIndex !== -1) {
+                const copy = [...prev];
+                copy[optIndex] = payload.message;
+                return copy;
+              }
+            }
             return [...prev, payload.message]
           })
         }

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import {
@@ -23,6 +24,7 @@ const NAV = [
 export default function Sidebar({ flagCount = 0, onClose }) {
   const { user, logout } = useAuthStore()
   const navigate = useNavigate()
+  const [avatarError, setAvatarError] = useState(false)
 
   const handleLogout = () => { logout(); navigate('/login') }
 
@@ -86,8 +88,17 @@ export default function Sidebar({ flagCount = 0, onClose }) {
       {/* User */}
       <div className="p-3 border-t border-sentinel-border shrink-0">
         <div className="flex items-center gap-3 px-2 py-2 mb-1">
-          <div className="w-8 h-8 rounded-full bg-cyan-400/10 border border-cyan-400/20 flex items-center justify-center text-xs font-mono text-cyan-400 font-bold shrink-0">
-            {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+          <div className="w-8 h-8 rounded-full bg-cyan-400/10 border border-cyan-400/20 flex items-center justify-center text-xs font-mono text-cyan-400 font-bold shrink-0 overflow-hidden">
+            {user?.avatar_url && !avatarError ? (
+              <img
+                src={user.avatar_url}
+                alt=""
+                className="w-full h-full object-cover"
+                onError={() => setAvatarError(true)}
+              />
+            ) : (
+              user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
+            )}
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm text-sentinel-text truncate font-medium">{user?.full_name}</p>
