@@ -287,7 +287,7 @@ export default function MyTeam() {
   // ── WebSocket connection ─────────────────────────────────────────────────
   useEffect(() => {
     if (!user?.id || !token) return
-    const wsBase = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1')
+    const wsBase = (import.meta.env.VITE_API_URL || 'https://sentinel-ny7w.onrender.com/api/v1')
       .replace(/^http/, 'ws')
       .replace(/\/api\/v1$/, '')
     const ws = new WebSocket(`${wsBase}/ws/${user.id}`)
@@ -304,6 +304,14 @@ export default function MyTeam() {
         if (payload.type === 'team_chat' && payload.message) {
           setMessages((prev) => {
             if (prev.find((m) => m.id === payload.message.id)) return prev
+            if (payload.message.sender_id === user?.id) {
+              const optIndex = prev.findIndex(m => m.id.startsWith('opt-') && m.content === payload.message.content);
+              if (optIndex !== -1) {
+                const copy = [...prev];
+                copy[optIndex] = payload.message;
+                return copy;
+              }
+            }
             return [...prev, payload.message]
           })
         }
@@ -321,6 +329,14 @@ export default function MyTeam() {
         if (payload.type === 'direct_message' && payload.message) {
           setDmMessages(prev => {
             if (prev.find(m => m.id === payload.message.id)) return prev
+            if (payload.message.sender_id === user?.id) {
+              const optIndex = prev.findIndex(m => m.id.startsWith('opt-') && m.content === payload.message.content);
+              if (optIndex !== -1) {
+                const copy = [...prev];
+                copy[optIndex] = payload.message;
+                return copy;
+              }
+            }
             return [...prev, payload.message]
           })
         }
@@ -470,6 +486,7 @@ export default function MyTeam() {
 
       {/* ── Layout: Directory + Chat ── */}
       <div
+        className="myteam-grid"
         style={{
           display: 'grid',
           gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.4fr)',
@@ -846,7 +863,10 @@ export default function MyTeam() {
       {/* Responsive + animations */}
       <style>{`
         @media (max-width: 700px) {
-          .myteam-grid { grid-template-columns: 1fr !important; }
+          .myteam-grid {
+            grid-template-columns: 1fr !important;
+            gap: 16px !important;
+          }
         }
         @keyframes pulse {
           0%, 100% { opacity: 0.5; }

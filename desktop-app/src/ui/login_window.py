@@ -29,7 +29,7 @@ class LoginWindow(ctk.CTk):
     def __init__(
         self,
         on_login_success: Callable,
-        api_base_url: str = "http://127.0.0.1:8000"
+        api_base_url: str = "https://sentinel-ny7w.onrender.com"
     ):
         super().__init__()   # ← this CTk() becomes the active Tk root
 
