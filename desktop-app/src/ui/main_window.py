@@ -249,7 +249,7 @@ class _NotificationBanner(ctk.CTkFrame):
 class MainWindow(ctk.CTk):
     MAX_FEED = 80
 
-    def __init__(self, user: dict, access_token: str, time_engine=None):
+    def __init__(self, user: dict, access_token: str, time_engine=None, session_manager=None):
         super().__init__()
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
@@ -257,6 +257,7 @@ class MainWindow(ctk.CTk):
         self.user         = user
         self.access_token = access_token
         self.time_engine  = time_engine
+        self.session_manager = session_manager
 
         # Notification Manager (OS toasts)
         self.notifier = NotificationManager()
@@ -368,6 +369,11 @@ class MainWindow(ctk.CTk):
             nav, "Tasks", "✓",
             command=lambda: self._show_view("tasks"))
         self._nav_btns["tasks"].pack(fill="x", pady=2)
+
+        self._nav_btns["team"] = NavButton(
+            nav, "My Team", "👥",
+            command=lambda: self._open_portal("my/team"))
+        self._nav_btns["team"].pack(fill="x", pady=2)
 
         # ── Portal shortcut tabs (open employee portal in default browser) ──
         portal_items = [
@@ -543,6 +549,12 @@ class MainWindow(ctk.CTk):
         self._tasks_loading = False
         self._build_tasks_view()
 
+        # Team View
+        self.team_frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
+        self.team_frame.grid_rowconfigure(0, weight=1)
+        self.team_frame.grid_columnconfigure(0, weight=1)
+        self.team_view_widget = None
+
         self._show_view("dashboard")
 
     def _toggle_alerts_panel(self):
@@ -556,7 +568,7 @@ class MainWindow(ctk.CTk):
             self._right_panel_view = "feed"
 
     def _show_view(self, view_name: str):
-        for f in [self.dashboard_frame, self.tasks_frame]:
+        for f in [self.dashboard_frame, self.tasks_frame, self.team_frame]:
             try:
                 f.grid_remove()
             except Exception:
@@ -575,6 +587,20 @@ class MainWindow(ctk.CTk):
         elif view_name == "tasks":
             self.tasks_frame.grid(row=1, column=0, sticky="nsew")
             self._fetch_tasks()
+        elif view_name == "team":
+            if not self.team_view_widget:
+                from ui.team_view import TeamView
+                self.team_view_widget = TeamView(
+                    self.team_frame,
+                    user=self.user,
+                    access_token=self.access_token,
+                    api_base_url=Config.API_BASE_URL,
+                    session_manager=self.session_manager
+                )
+                self.team_view_widget.pack(fill="both", expand=True)
+            else:
+                self.team_view_widget.refresh_all()
+            self.team_frame.grid(row=1, column=0, sticky="nsew")
 
         if hasattr(self, '_nav_btns') and view_name in self._nav_btns:
             btn = self._nav_btns[view_name]

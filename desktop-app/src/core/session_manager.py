@@ -41,6 +41,11 @@ class SessionManager:
         self.last_sync_time: Optional[datetime] = None
         self.offline_queue = []
         self.on_alert_received: Optional[Callable] = None
+        self.on_team_chat: Optional[Callable] = None
+        self.on_direct_message: Optional[Callable] = None
+        self.on_typing: Optional[Callable] = None
+        self.on_presence: Optional[Callable] = None
+        self.on_pin_update: Optional[Callable] = None
         self.ws_app: Optional[websocket.WebSocketApp] = None
 
     def connect_realtime(self):
@@ -56,11 +61,28 @@ class SessionManager:
                     self.on_alert_received(data)
                 elif msg_type == "task_assigned" and getattr(self, "on_task_received", None):
                     self.on_task_received(data)
+                elif msg_type == "team_chat" and self.on_team_chat:
+                    self.on_team_chat(data)
+                elif msg_type == "direct_message" and self.on_direct_message:
+                    self.on_direct_message(data)
+                elif msg_type == "typing" and self.on_typing:
+                    self.on_typing(data)
+                elif msg_type == "presence" and self.on_presence:
+                    self.on_presence(data)
+                elif msg_type == "pin_update" and self.on_pin_update:
+                    self.on_pin_update(data)
             except Exception as e:
                 logger.warning(f"WS error processing message: {e}")
 
         self.ws_app = websocket.WebSocketApp(ws_url, on_message=on_message)
         threading.Thread(target=self.ws_app.run_forever, daemon=True).start()
+
+    def send_ws_message(self, data: dict):
+        if self.ws_app and self.ws_app.sock and self.ws_app.sock.connected:
+            try:
+                self.ws_app.send(json.dumps(data))
+            except Exception as e:
+                logger.warning(f"Failed to send WS message: {e}")
 
     def _get_headers(self) -> Dict[str, str]:
         return {

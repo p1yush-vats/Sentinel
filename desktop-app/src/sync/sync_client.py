@@ -141,6 +141,7 @@ class SyncClient:
             # 2. Push abnormality records (one per session)
             for abn in unsynced_abnormalities:
                 try:
+                    local_session = self.local_db.get_session(abn["session_id"])
                     if not local_session or not local_session.get("backend_session_id"):
                         logger.warning(f"Orphaned abnormality for session {abn['session_id'][:8]}... — no backend session ID. Marking as skipped.")
                         self.local_db.mark_abnormality_synced(abn["session_id"])

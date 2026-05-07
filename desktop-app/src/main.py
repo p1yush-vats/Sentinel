@@ -349,6 +349,11 @@ class SentinelApp:
         )
         self.session_manager.on_alert_received = self._on_alert_received
         self.session_manager.on_task_received  = self._on_task_received
+        self.session_manager.on_team_chat      = self._on_ws_team_chat
+        self.session_manager.on_direct_message = self._on_ws_direct_message
+        self.session_manager.on_typing         = self._on_ws_typing
+        self.session_manager.on_presence       = self._on_ws_presence
+        self.session_manager.on_pin_update     = self._on_ws_pin_update
         self.sync_client = SyncClient(
             api_base_url=Config.API_BASE_URL,
             access_token=self.access_token,
@@ -390,11 +395,92 @@ class SentinelApp:
             # Refresh Tasks tab list
             self.main_window.after(0, lambda: self.main_window.refresh_tasks())
 
+    def _on_ws_team_chat(self, data: dict):
+        msg = data.get("message", {})
+        sender_id = msg.get("sender_id")
+        
+        # 1. Trigger OS Toast and in-app banner for mentions
+        if sender_id != self.user["id"]:
+            content = msg.get("content", "")
+            me_full = self.user.get("full_name", "")
+            me_first = me_full.split()[0] if me_full else ""
+            
+            is_mention = False
+            if me_full and f"@{me_full.lower()}" in content.lower():
+                is_mention = True
+            elif me_first and f"@{me_first.lower()}" in content.lower():
+                is_mention = True
+                
+            if is_mention and self.main_window:
+                self.main_window.after(0, lambda: self.main_window.notifier.send(
+                    f"Mentioned by {msg.get('sender_name')} 👥", content, severity="info"
+                ))
+                self.main_window.after(0, lambda: self.main_window.show_banner(
+                    f"Mention in Chat: {msg.get('sender_name')}: {content}", severity="info", duration_ms=6000
+                ))
+                
+        # 2. Forward to active TeamView widget
+        if self.main_window and getattr(self.main_window, "team_view_widget", None):
+            self.main_window.after(0, lambda: self.main_window.team_view_widget.handle_ws_team_chat(data))
+
+    def _on_ws_direct_message(self, data: dict):
+        msg = data.get("message", {})
+        sender_id = msg.get("sender_id")
+        
+        # 1. Trigger OS Toast and in-app banner if DM is not currently open/focused
+        dm_open = False
+        if self.main_window and getattr(self.main_window, "team_view_widget", None):
+            team_view = self.main_window.team_view_widget
+            if sender_id in team_view.active_dm_windows:
+                dm_open = True
+                
+        if sender_id != self.user["id"] and not dm_open:
+            content = msg.get("content", "")
+            if self.main_window:
+                self.main_window.after(0, lambda: self.main_window.notifier.send(
+                    f"New DM from {msg.get('sender_name')} ✉", content, severity="info"
+                ))
+                self.main_window.after(0, lambda: self.main_window.show_banner(
+                    f"Direct Message: {msg.get('sender_name')}: {content}", severity="info", duration_ms=6000
+                ))
+                
+        # 2. Forward to active DM window or refresh directory counts
+        if self.main_window and getattr(self.main_window, "team_view_widget", None):
+            team_view = self.main_window.team_view_widget
+            if sender_id in team_view.active_dm_windows:
+                dm_win = team_view.active_dm_windows[sender_id]
+                self.main_window.after(0, lambda: dm_win.handle_ws_dm(data))
+            else:
+                self.main_window.after(0, lambda: team_view.refresh_all())
+
+    def _on_ws_typing(self, data: dict):
+        if not self.main_window or not getattr(self.main_window, "team_view_widget", None):
+            return
+            
+        team_view = self.main_window.team_view_widget
+        target = data.get("target")
+        user_id = data.get("user_id")
+        
+        if target == "department":
+            self.main_window.after(0, lambda: team_view.handle_ws_typing(data))
+        elif target == self.user["id"] and user_id in team_view.active_dm_windows:
+            dm_win = team_view.active_dm_windows[user_id]
+            self.main_window.after(0, lambda: dm_win.handle_ws_typing(data))
+
+    def _on_ws_presence(self, data: dict):
+        if self.main_window and getattr(self.main_window, "team_view_widget", None):
+            self.main_window.after(0, lambda: self.main_window.team_view_widget.handle_ws_presence(data))
+
+    def _on_ws_pin_update(self, data: dict):
+        if self.main_window and getattr(self.main_window, "team_view_widget", None):
+            self.main_window.after(0, lambda: self.main_window.team_view_widget.handle_ws_pin_update(data))
+
     def _show_main(self):
         self.main_window = MainWindow(
             user=self.user,
             access_token=self.access_token,
-            time_engine=self.session_manager.time_engine
+            time_engine=self.session_manager.time_engine,
+            session_manager=self.session_manager
         )
         self.main_window.on_start_session = self._start_session
         self.main_window.on_end_session   = self._end_session
