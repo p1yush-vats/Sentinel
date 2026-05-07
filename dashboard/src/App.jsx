@@ -26,6 +26,7 @@ import MyFlags from './employee/MyFlags'
 import MyLeave from './employee/MyLeave'
 import MyCalendar from './employee/MyCalendar'
 import MyTasks from './employee/MyTasks'
+import MyTeam from './employee/MyTeam'
 import MySettings from './employee/MySettings'
 
 function AdminRoute({ children }) {
@@ -94,6 +95,7 @@ export default function App() {
           <Route path="leave"     element={<MyLeave />} />
           <Route path="calendar"  element={<MyCalendar />} />
           <Route path="tasks"     element={<MyTasks />} />
+          <Route path="team"      element={<MyTeam />} />
           <Route path="settings"  element={<MySettings />} />
         </Route>
 

@@ -3,13 +3,14 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useTheme, THEMES } from './ThemeContext'
 import { useAuthStore } from '../store/authStore'
 
-import { LayoutDashboard, Clock, CheckSquare, Flag, Calendar, Settings as SettingsIcon, FileText, Menu, ChevronUp, ChevronDown, ArrowUpRight, X } from 'lucide-react'
+import { LayoutDashboard, Clock, CheckSquare, Flag, Calendar, Settings as SettingsIcon, FileText, Menu, ChevronUp, ChevronDown, ArrowUpRight, X, Users } from 'lucide-react'
 
 const NAV = [
   { path: '/my/dashboard', label: 'DASHBOARD',   short: 'HOME',     icon: LayoutDashboard },
   { path: '/my/sessions',  label: 'MY SESSIONS',  short: 'SESSIONS', icon: Clock },
   { path: '/my/tasks',     label: 'MY TASKS',     short: 'TASKS',    icon: CheckSquare },
   { path: '/my/flags',     label: 'MY FLAGS',     short: 'FLAGS',    icon: Flag },
+  { path: '/my/team',      label: 'MY TEAM',      short: 'TEAM',     icon: Users },
   { path: '/my/leave',     label: 'LEAVE',        short: 'LEAVE',    icon: FileText },
   { path: '/my/calendar',  label: 'CALENDAR',     short: 'CAL',      icon: Calendar },
   { path: '/my/settings',  label: 'SETTINGS',     short: 'PREFS',    icon: SettingsIcon },

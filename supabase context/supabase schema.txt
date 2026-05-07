@@ -1,0 +1,204 @@
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.abnormalities (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  session_id uuid NOT NULL UNIQUE,
+  employee_id uuid NOT NULL,
+  overall_severity character varying NOT NULL DEFAULT 'LOW'::character varying,
+  confidence_score numeric NOT NULL DEFAULT 0,
+  detections jsonb NOT NULL DEFAULT '{}'::jsonb,
+  first_detected_at timestamp with time zone NOT NULL,
+  last_updated_at timestamp with time zone NOT NULL,
+  reviewed boolean DEFAULT false,
+  reviewed_by uuid,
+  reviewed_at timestamp with time zone,
+  review_decision character varying,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT abnormalities_pkey PRIMARY KEY (id),
+  CONSTRAINT abnormalities_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.sessions(id),
+  CONSTRAINT abnormalities_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id),
+  CONSTRAINT abnormalities_reviewed_by_fkey FOREIGN KEY (reviewed_by) REFERENCES public.employees(id)
+);
+CREATE TABLE public.admin_actions (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  admin_id uuid NOT NULL,
+  employee_id uuid NOT NULL,
+  session_id uuid,
+  action_type character varying NOT NULL,
+  justification text NOT NULL,
+  metadata jsonb,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT admin_actions_pkey PRIMARY KEY (id),
+  CONSTRAINT admin_actions_admin_id_fkey FOREIGN KEY (admin_id) REFERENCES public.employees(id),
+  CONSTRAINT admin_actions_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id),
+  CONSTRAINT admin_actions_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.sessions(id)
+);
+CREATE TABLE public.appeals (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  employee_id uuid NOT NULL,
+  session_id uuid NOT NULL,
+  abnormality_id uuid,
+  reason text NOT NULL,
+  status character varying DEFAULT 'pending'::character varying,
+  reviewed_by uuid,
+  reviewed_at timestamp with time zone,
+  admin_response text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT appeals_pkey PRIMARY KEY (id),
+  CONSTRAINT appeals_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id),
+  CONSTRAINT appeals_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.sessions(id),
+  CONSTRAINT appeals_abnormality_id_fkey FOREIGN KEY (abnormality_id) REFERENCES public.abnormalities(id),
+  CONSTRAINT appeals_reviewed_by_fkey FOREIGN KEY (reviewed_by) REFERENCES public.employees(id)
+);
+CREATE TABLE public.audit_log (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  event_type character varying NOT NULL,
+  actor_id uuid,
+  target_id uuid,
+  target_type character varying,
+  action character varying NOT NULL,
+  metadata jsonb,
+  ip_address inet,
+  user_agent text,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT audit_log_pkey PRIMARY KEY (id),
+  CONSTRAINT audit_log_actor_id_fkey FOREIGN KEY (actor_id) REFERENCES public.employees(id)
+);
+CREATE TABLE public.employees (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  email character varying NOT NULL UNIQUE,
+  password_hash character varying NOT NULL,
+  full_name character varying NOT NULL,
+  role character varying NOT NULL DEFAULT 'employee'::character varying,
+  department character varying,
+  is_active boolean DEFAULT true,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  avatar_url text,
+  phone character varying,
+  employee_code character varying,
+  position character varying,
+  gender character varying DEFAULT NULL::character varying,
+  CONSTRAINT employees_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.leaves (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  employee_id uuid NOT NULL,
+  leave_type character varying NOT NULL CHECK (leave_type::text = ANY (ARRAY['EL'::character varying, 'CL'::character varying, 'SL'::character varying, 'ML'::character varying]::text[])),
+  from_date date NOT NULL,
+  to_date date NOT NULL,
+  days_requested integer NOT NULL DEFAULT 1,
+  reason text NOT NULL,
+  status character varying DEFAULT 'pending'::character varying CHECK (status::text = ANY (ARRAY['pending'::character varying, 'approved'::character varying, 'rejected'::character varying, 'needs_info'::character varying]::text[])),
+  reviewed_by uuid,
+  reviewed_at timestamp with time zone,
+  admin_response text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  comments jsonb DEFAULT '[]'::jsonb,
+  medical_certificate text,
+  CONSTRAINT leaves_pkey PRIMARY KEY (id),
+  CONSTRAINT leaves_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id),
+  CONSTRAINT leaves_reviewed_by_fkey FOREIGN KEY (reviewed_by) REFERENCES public.employees(id)
+);
+CREATE TABLE public.notification_preferences (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  employee_id uuid NOT NULL,
+  email_notifications boolean DEFAULT true,
+  break_reminders boolean DEFAULT true,
+  weekly_reports boolean DEFAULT false,
+  abnormality_alerts boolean DEFAULT true,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT notification_preferences_pkey PRIMARY KEY (id),
+  CONSTRAINT notification_preferences_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id)
+);
+CREATE TABLE public.productivity_metrics (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  session_id uuid NOT NULL,
+  employee_id uuid NOT NULL,
+  hour_of_day integer,
+  activity_intensity numeric,
+  break_effectiveness_score numeric,
+  keystroke_count integer,
+  mouse_movement_count integer,
+  paste_count integer,
+  recorded_at timestamp without time zone NOT NULL,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT productivity_metrics_pkey PRIMARY KEY (id),
+  CONSTRAINT productivity_metrics_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.sessions(id),
+  CONSTRAINT productivity_metrics_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id)
+);
+CREATE TABLE public.reports (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  report_type character varying NOT NULL,
+  generated_by uuid NOT NULL,
+  start_date date NOT NULL,
+  end_date date NOT NULL,
+  filters jsonb,
+  file_path character varying,
+  file_format character varying,
+  generated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT reports_pkey PRIMARY KEY (id),
+  CONSTRAINT reports_generated_by_fkey FOREIGN KEY (generated_by) REFERENCES public.employees(id)
+);
+CREATE TABLE public.sessions (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  employee_id uuid NOT NULL,
+  start_time timestamp without time zone NOT NULL,
+  end_time timestamp without time zone,
+  total_work_minutes integer DEFAULT 0,
+  total_break_minutes integer DEFAULT 0,
+  lunch_taken boolean DEFAULT false,
+  status character varying DEFAULT 'active'::character varying,
+  session_quality_score numeric,
+  risk_score numeric DEFAULT 0,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT sessions_pkey PRIMARY KEY (id),
+  CONSTRAINT sessions_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id)
+);
+CREATE TABLE public.tasks (
+  id uuid NOT NULL,
+  title character varying NOT NULL,
+  description text,
+  assigned_to uuid NOT NULL,
+  assigned_by uuid NOT NULL,
+  due_date timestamp with time zone,
+  priority character varying NOT NULL,
+  status character varying NOT NULL,
+  completion_note text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  completed_at timestamp with time zone,
+  CONSTRAINT tasks_pkey PRIMARY KEY (id),
+  CONSTRAINT tasks_assigned_to_fkey FOREIGN KEY (assigned_to) REFERENCES public.employees(id),
+  CONSTRAINT tasks_assigned_by_fkey FOREIGN KEY (assigned_by) REFERENCES public.employees(id)
+);
+CREATE TABLE public.work_rules (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  department character varying,
+  employee_id uuid,
+  work_minutes_per_hour integer DEFAULT 50,
+  break_minutes_per_hour integer DEFAULT 10,
+  lunch_duration_minutes integer DEFAULT 30,
+  daily_work_target_minutes integer DEFAULT 400,
+  detection_sensitivity character varying DEFAULT 'medium'::character varying,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT work_rules_pkey PRIMARY KEY (id),
+  CONSTRAINT work_rules_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id)
+);
+CREATE TABLE public.work_time_logs (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  session_id uuid NOT NULL,
+  log_type character varying NOT NULL,
+  start_time timestamp without time zone NOT NULL,
+  end_time timestamp without time zone,
+  duration_minutes integer,
+  break_token_used boolean DEFAULT false,
+  created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT work_time_logs_pkey PRIMARY KEY (id),
+  CONSTRAINT work_time_logs_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.sessions(id)
+);

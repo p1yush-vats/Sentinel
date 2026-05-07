@@ -34,6 +34,7 @@ export const employeesAPI = {
   remove:    (id)     => api.delete(`/employees/${id}`),
   sendAlert: (id, d)  => api.post(`/employees/${id}/alert`, d),
   forcePassword: (id, d) => api.post(`/employees/${id}/force-password`, d),
+  getMyTeam: ()       => api.get('/employees/my-team'),
 }
 
 // ── Sessions (admin + employee) ───────────────────────────────
@@ -106,4 +107,19 @@ export const tasksAPI = {
 // ── Reports ───────────────────────────────────────────────────
 export const reportsAPI = {
   downloadDossier: (id) => api.get(`/reports/employee/${id}/dossier`, { responseType: 'blob' }),
+}
+
+// ── Chat ──────────────────────────────────────────────────────
+export const chatAPI = {
+  getTeamChat:    (p)  => api.get('/chat/team', { params: p }),
+  postTeamMessage:(d)  => api.post('/chat/team', d),
+  getPinned:      ()   => api.get('/chat/team/pinned'),
+  pinMessage:     (id) => api.post(`/chat/team/pin/${id}`),
+}
+
+// ── Direct Messages ───────────────────────────────────────────
+export const dmAPI = {
+  getHistory:    (partnerId, p) => api.get(`/dm/${partnerId}`, { params: p }),
+  sendMessage:   (partnerId, d) => api.post(`/dm/${partnerId}`, d),
+  getUnreadCount: ()            => api.get('/dm/unread/count'),
 }

@@ -146,6 +146,55 @@ async def get_employees(
     return {"employees": employee_dicts, "total": len(employee_dicts)}
 
 
+@router.get("/my-team")
+async def get_my_team(
+    db: AsyncSession = Depends(get_db),
+    current_user_id: str = Depends(get_current_user_id)
+):
+    # Get current user's department
+    import uuid as _uuid
+    try:
+        me_uuid = _uuid.UUID(current_user_id)
+    except ValueError:
+        return {"team": []}
+        
+    result = await db.execute(select(Employee).where(Employee.id == me_uuid))
+    me = result.scalar_one_or_none()
+    if not me or not me.department:
+        return {"team": []}
+        
+    # Get all active employees in same department except self
+    q = select(Employee).where(
+        Employee.department == me.department,
+        Employee.is_active == True,
+        Employee.id != me_uuid
+    ).order_by(Employee.full_name)
+    
+    result = await db.execute(q)
+    team_members = result.scalars().all()
+    
+    if not team_members:
+        return {"team": []}
+        
+    team_ids = [emp.id for emp in team_members]
+    
+    # Check active session to check online status (Now using Websocket Manager!)
+    from ..core.websocket import manager
+    
+    team_dicts = []
+    for emp in team_members:
+        team_dicts.append({
+            "id": str(emp.id),
+            "full_name": emp.full_name,
+            "position": emp.position,
+            "avatar_url": emp.avatar_url,
+            "email": emp.email,
+            "is_online": str(emp.id) in manager.active_connections
+        })
+        
+    return {"team": team_dicts}
+
+
 @router.get("/{employee_id}")
 async def get_employee(
     employee_id:     str,
