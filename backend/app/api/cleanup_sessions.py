@@ -4,7 +4,7 @@ Run from the project root: python -m app.api.cleanup_sessions
 """
 import httpx
 
-API_URL = "http://127.0.0.1:8000"
+API_URL = "https://sentinel-ny7w.onrender.com"
 
 # Get credentials
 email = input("Email: ")
