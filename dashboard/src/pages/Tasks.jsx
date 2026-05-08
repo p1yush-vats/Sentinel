@@ -4,17 +4,19 @@ import { CheckSquare, Plus, Trash2, Clock, AlertCircle, ChevronDown, X } from 'l
 import toast from 'react-hot-toast'
 
 const PRIORITY_STYLES = {
-  low:    'text-emerald-400 bg-emerald-400/10 border-emerald-400/20',
+  low: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20',
   medium: 'text-amber-400 bg-amber-400/10 border-amber-400/20',
-  high:   'text-orange-400 bg-orange-400/10 border-orange-400/20',
+  high: 'text-orange-400 bg-orange-400/10 border-orange-400/20',
   urgent: 'text-red-400 bg-red-400/10 border-red-400/20',
 }
 
 const STATUS_STYLES = {
-  pending:     'text-slate-400 bg-slate-400/10 border-slate-400/20',
+  pending: 'text-slate-400 bg-slate-400/10 border-slate-400/20',
   in_progress: 'text-blue-400 bg-blue-400/10 border-blue-400/20',
-  completed:   'text-emerald-400 bg-emerald-400/10 border-emerald-400/20',
+  completed: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20',
 }
+
+import { createPortal } from 'react-dom'
 
 function AssignModal({ employees, onClose, onCreate }) {
   const [form, setForm] = useState({ title: '', description: '', assigned_to: '', priority: 'medium', due_date: '' })
@@ -30,7 +32,7 @@ function AssignModal({ employees, onClose, onCreate }) {
     finally { setSaving(false) }
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in p-4">
       <div className="bg-navy-800 border border-sentinel-border rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-in">
         {/* Header */}
@@ -105,31 +107,31 @@ function AssignModal({ employees, onClose, onCreate }) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
-
 }
 
 export default function Tasks() {
-  const [tasks, setTasks]         = useState([])
+  const [tasks, setTasks] = useState([])
   const [employees, setEmployees] = useState([])
-  const [loading, setLoading]     = useState(true)
+  const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [filterEmp, setFilterEmp] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
 
   const load = () => {
     const params = {}
-    if (filterEmp)    params.assigned_to = filterEmp
+    if (filterEmp) params.assigned_to = filterEmp
     if (filterStatus) params.status = filterStatus
     tasksAPI.getAll(params)
       .then(r => setTasks(r.data?.tasks || []))
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false))
   }
 
   useEffect(() => {
-    employeesAPI.getAll().then(r => setEmployees(r.data?.employees || [])).catch(() => {})
+    employeesAPI.getAll().then(r => setEmployees(r.data?.employees || [])).catch(() => { })
   }, [])
 
   useEffect(() => { load() }, [filterEmp, filterStatus])
