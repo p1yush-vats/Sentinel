@@ -213,7 +213,7 @@ async def review_abnormality(
     employee = await db.scalar(select(Employee).where(Employee.id == record.employee_id))
     if employee:
         note = review_data.justification if review_data.justification else f"Your activity on session {record.session_id} was reviewed."
-        if review_data.decision in ("warn", "warned"):
+        if review_data.decision in ("warn", "warned", "warning_issued"):
             background_tasks.add_task(send_flag_warning, employee.email, employee.full_name, note)
         elif review_data.decision in ("escalate", "escalated"):
             background_tasks.add_task(send_flag_escalation, employee.email, employee.full_name, note)
