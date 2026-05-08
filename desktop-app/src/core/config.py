@@ -34,11 +34,11 @@ class Config:
     TIMEZONE_NAME = "Asia/Kolkata"
 
     # Backend API — defaults to localhost for development
-    API_BASE_URL = os.getenv("API_BASE_URL", "https://sentinel-ny7w.onrender.com")
+    API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
     API_VERSION  = "/api/v1"
 
     # Employee portal URL — used by webbrowser.open() for sidebar tabs
-    PORTAL_URL = os.getenv("PORTAL_URL", "https://sentinel-self.vercel.app")
+    PORTAL_URL = os.getenv("PORTAL_URL", "http://localhost:3000")
 
     # Work Rules (match backend defaults)
     WORK_MINUTES_PER_HOUR      = int(os.getenv("WORK_MINUTES_PER_HOUR", 50))
